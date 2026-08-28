@@ -1,0 +1,40 @@
+{
+    "name": "chronhub/storm-telemetry",
+    "description": "Opt-in observability for the Storm framework — fans out the per-module observability ports to structured Monolog logs, a saga history trail, health aggregation and a Prometheus exposition.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["ddd", "cqrs", "event-sourcing", "telemetry", "observability", "monolog"],
+    "require": {
+        "php": ">=8.5",
+        "chronhub/storm-chronicler": "self.version",
+        "chronhub/storm-clock": "self.version",
+        "chronhub/storm-contracts": "self.version",
+        "chronhub/storm-projector": "self.version",
+        "chronhub/storm-saga": "self.version",
+        "chronhub/storm-support": "self.version",
+        "doctrine/dbal": "^4.0",
+        "psr/log": "^3.0",
+        "symfony/console": "^8.1",
+        "symfony/dependency-injection": "^8.1",
+        "symfony/event-dispatcher": "^8.1"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^13.3.0",
+        "phpstan/phpstan": "^2.2.8"
+    },
+    "autoload": {
+        "psr-4": {
+            "Storm\\Telemetry\\": "./"
+        },
+        "exclude-from-classmap": [
+            "/Tests/"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Storm\\Telemetry\\Tests\\": "Tests/"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
