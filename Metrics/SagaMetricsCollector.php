@@ -84,6 +84,7 @@ final readonly class SagaMetricsCollector implements MetricsCollector
             "SELECT
                 (SELECT count(*) FROM workflow_outbox WHERE status = 'pending') AS pending,
                 (SELECT count(*) FROM workflow_outbox WHERE status = 'failed') AS failed,
+                (SELECT count(*) FROM workflow_outbox WHERE status = 'pending' AND attempts > 0) AS backing_off,
                 COALESCE((SELECT EXTRACT(EPOCH FROM (clock_timestamp() - min(created_at)))::bigint
                           FROM workflow_outbox WHERE status = 'pending'), 0) AS oldest_pending_age",
         );
@@ -92,6 +93,9 @@ final readonly class SagaMetricsCollector implements MetricsCollector
             MetricFamily::gauge('storm_saga_outbox', 'Saga command outbox rows by status', [
                 new MetricSample(['status' => 'pending'], (int) ($row['pending'] ?? 0)),
                 new MetricSample(['status' => 'failed'], (int) ($row['failed'] ?? 0)),
+            ]),
+            MetricFamily::gauge('storm_saga_outbox_backing_off', 'Pending saga commands that failed at least one dispatch and are still retried', [
+                new MetricSample([], (int) ($row['backing_off'] ?? 0)),
             ]),
             MetricFamily::gauge('storm_saga_outbox_oldest_pending_age_seconds', 'Age of the oldest still-pending saga command, 0 when none', [
                 new MetricSample([], (int) ($row['oldest_pending_age'] ?? 0)),

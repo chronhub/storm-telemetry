@@ -41,6 +41,7 @@ final readonly class OutboxMetricsCollector implements MetricsCollector
                     count(*) FILTER (WHERE status = 'failed') AS failed,
                     count(DISTINCT partition_key) FILTER (WHERE status = 'pending') AS partitions,
                     count(*) FILTER (WHERE status = 'pending' AND next_attempt_at > clock_timestamp()) AS cooling,
+                    count(*) FILTER (WHERE status = 'pending' AND attempts > 0) AS backing_off,
                     COALESCE(EXTRACT(EPOCH FROM (clock_timestamp() - min(occurred_at) FILTER (WHERE status = 'pending')))::bigint, 0) AS oldest_pending_age
                  FROM es_outbox",
             );
@@ -55,14 +56,53 @@ final readonly class OutboxMetricsCollector implements MetricsCollector
             $families[] = MetricFamily::gauge('storm_outbox_events_cooling', 'Pending event rows whose next attempt lies in the future', [
                 new MetricSample([], (int) ($row['cooling'] ?? 0)),
             ]);
+            // a row that failed a publish and is still retried, whether or not its back-off has
+            // passed: what a broker outage leaves behind, and what the pending count alone hides
+            $families[] = MetricFamily::gauge('storm_outbox_events_backing_off', 'Pending event rows that failed at least one publish and are still retried', [
+                new MetricSample([], (int) ($row['backing_off'] ?? 0)),
+            ]);
             $families[] = MetricFamily::gauge('storm_outbox_events_oldest_pending_age_seconds', 'Age of the oldest still-pending event row, 0 when none', [
                 new MetricSample([], (int) ($row['oldest_pending_age'] ?? 0)),
             ]);
         }
 
+        if ($this->connection->createSchemaManager()->tablesExist(['es_outbox_relay'])) {
+            /** @var array{age: int|string|null, relayed: int|string|null}|false $beat */
+            $beat = $this->connection->fetchAssociative(
+                /* language=PostgreSQL */
+                'SELECT EXTRACT(EPOCH FROM (clock_timestamp() - max(ticked_at)))::bigint AS age, sum(relayed_total) AS relayed FROM es_outbox_relay',
+            );
+
+            // No sample at all before the first tick, never a zero: a zero would read as a relay
+            // that just ticked, the very blindness this family exists to end; an absent series is
+            // what an alert rule tests for with absent().
+            if ($beat !== false && $beat['age'] !== null) {
+                $families[] = MetricFamily::gauge('storm_outbox_relay_tick_age_seconds', 'Seconds since the event outbox relay last drained, whether or not it found work', [
+                    new MetricSample([], (int) $beat['age']),
+                ]);
+                $families[] = MetricFamily::gauge('storm_outbox_relay_relayed_total', 'Event rows the outbox relay has disposed of over its heartbeat rows', [
+                    new MetricSample([], (int) ($beat['relayed'] ?? 0)),
+                ]);
+            }
+        }
+
         if ($this->connection->createSchemaManager()->tablesExist(['es_inbox'])) {
+            /** @var array{rows: int|string, skipped: int|string, touched: int|string} $inbox */
+            $inbox = $this->connection->fetchAssociative(
+                /* language=PostgreSQL */
+                'SELECT count(*) AS rows, COALESCE(sum(duplicates), 0) AS skipped, count(*) FILTER (WHERE duplicates > 0) AS touched
+                 FROM es_inbox',
+            );
             $families[] = MetricFamily::gauge('storm_inbox_rows', 'Processed-message rows currently retained by the idempotency inbox', [
-                new MetricSample([], (int) $this->connection->fetchOne('SELECT count(*) FROM es_inbox')),
+                new MetricSample([], (int) $inbox['rows']),
+            ]);
+            // the redeliveries the inbox absorbed, over the rows it retains: a skip runs no handler
+            // and acks, so without these two the class leaves no trace outside the table
+            $families[] = MetricFamily::gauge('storm_inbox_duplicates_skipped', 'Redeliveries the idempotency inbox absorbed, summed over the rows it retains', [
+                new MetricSample([], (int) $inbox['skipped']),
+            ]);
+            $families[] = MetricFamily::gauge('storm_inbox_duplicate_rows', 'Retained inbox rows that absorbed at least one redelivery', [
+                new MetricSample([], (int) $inbox['touched']),
             ]);
         }
 

@@ -31,7 +31,7 @@ final readonly class PrometheusTextRenderer
                 continue;
             }
 
-            $out .= sprintf("# HELP %s %s\n", $family->name, $family->help);
+            $out .= sprintf("# HELP %s %s\n", $family->name, str_replace(['\\', "\n"], ['\\\\', '\\n'], $family->help));
             $out .= sprintf("# TYPE %s %s\n", $family->name, $family->type);
 
             foreach ($family->samples as $sample) {

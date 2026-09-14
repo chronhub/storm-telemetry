@@ -1,0 +1,417 @@
+classes:
+  -
+    id: append-conflict
+    title: 'Expected-version append conflict'
+    prevention:
+      state: available
+      kind: code
+      reference: src/Chronicler/Exception/ConcurrencyException.php
+    detection:
+      state: available
+      kind: structured_log
+      reference: 'Storm\Telemetry\StormObservability::recordOccConflict; storm.event_store.occ_conflict; stale conflicts at info, duplicate versions at warning'
+    resolution:
+      state: available
+      kind: runbook
+      reference: 'docs/operations/append-conflict.md'
+      preconditions: 'Read storm.event_store.occ_conflict by kind and by stream: a stale line is a lost race the forward retry absorbs, a duplicate is poison that dead-letters at once; tell a converging stream from a hot one whose losers keep losing; never read an empty queue as convergence while losers wait on their delay.'
+      expected_result: 'The stream''s version reaches the work aimed at it, one append per command, the effect exact at its target; no duplicate and no dead letter on the stream; the stale rate back to the background once the burst passed, or the contention treated as a design fact.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:append-conflict-recovery; merged revision 1c70b596536aaa03d2fe84a482daa7ddc8fd69e9, coordination issue 496.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; reserved smoke_append_conflict_ schema, synchronous event delivery, no resident workers or PostgreSQL clients, a drained seed baseline, and the Storm log offset recorded so only what the burst writes is read.'
+      hypothesis: 'Concurrent commands on one stream lose races that the store types as retryable and the sink logs as stale, the forward retry re-decides against the advanced stream, and the stream converges to exactly one append per command with no duplicate and no dead letter.'
+      injection: 'Dispatch forty 100-cent DepositCashMoney commands on one account through the command bus, assert nothing appended, then run four messenger:consume processes at once on the queue for a bounded time without the bench drained-stop.'
+      observation: 'The Storm log carries storm.event_store.occ_conflict records of kind stale at INFO on the account stream, at least one, and none of kind duplicate; the count is stochastic and not bounded above. No message failed. The stream carries exactly forty more deposits, the command queue is empty and the balance carries exactly the burst; a second pass of two workers changes nothing.'
+      recovery: 'Run make append-conflict-recovery in the provisioned Bank checkout with APPEND_CONFLICT_DATABASE_HOST, APPEND_CONFLICT_BROKER_HOST and MESSENGER_EVENTS_DSN=sync:// declared. The recovery is the workers living past the retry''s capped jittered delay; the single-worker and burst-not-consumed variants must fail. A drained-stop that reads the queue empty while losers wait on the delay exchange stops short of convergence, which the runbook records.'
+      cleanup: 'The guarded wrapper bin/append-conflict-smoke.sh holds a per-schema lock, refuses any schema outside smoke_append_conflict_, resets before and drops after on any exit, preserving the original failure, and verifies the disposable resources are clean. Retire dedicated containers after preserving evidence.'
+  -
+    id: poison-message
+    title: 'Permanently failing message handler'
+    prevention:
+      state: not_applicable
+      reason: 'A handler that throws on every delivery is an application defect the framework cannot prevent from being written or deployed; what it does is contain it: the failure taxonomy tells poison from transient, the batched consumer rolls the batch back, replays per message and captures the poison alone, the failure transport holds it for an operator''s verdict, and no innocent is lost or applied twice. Declaring a failure unrecoverable or recoverable is the application''s own contract.'
+      decision: 'Operations plan 377, decision 10134.'
+    detection:
+      state: available
+      kind: healthcheck
+      reference: 'Storm\Symfony\Health\FailedMessagesHealthCheck::check(), failed_messages, wired for the transport storm.inbox.failure_transport names: Degraded from the first captured message, naming messenger:failed:show, :retry and :remove; Ok with its reason when the transport cannot count. Metric storm_failed_messages{transport}, no sample when it cannot count. Log token storm.story.batch_isolated at warning, the one trace of a batch rolled back and replayed per message, with the batch size and what the replay condemned, redelivered and acked. Unit-qualified on a counting transport; no alert delivery claimed.'
+    resolution:
+      state: available
+      kind: runbook
+      reference: 'docs/operations/poison-message.md'
+      preconditions: 'Read the failure transport, not the queues: messenger:failed:show for the error class, the origin and the redelivery count; tell a handler bug from an undecodable type, a wrong payload and a wait that never cleared; record ids and the aggregate named before changing anything.'
+      expected_result: 'Replayed once the fix shipped, the message''s effect observed once at its target and the failure transport empty for its id; or purged on a recorded verdict; no new capture with the same error follows.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:poison-message-recovery; merged revision 3b157736690abadb36d7a1222683b50520934493, coordination issue 497.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; reserved smoke_poison_message_ schema, the events lane on the disposable broker rather than sync, no resident workers or PostgreSQL clients, a drained seed baseline with an empty failure transport, and the application log offset recorded so only what the run writes is read.'
+      hypothesis: 'A handler that throws the unrecoverable kind on one event poisons that message alone: the batch it lands in is rolled back and replayed per message, the poison captured once with no redelivery, the innocents committed; replay once the fix ships and purge on a verdict each leave the failure transport empty.'
+      injection: 'Rename an identity to the hard-poison marker of PoisonHandlerProbe and dispatch fifteen 100-cent deposits through the command bus, consume the commands, relay the events, then run storm:bus:consume-batched on the events lane in batches of sixteen, once.'
+      observation: 'Exactly one message on the failure transport, its body naming UnrecoverableMessageHandlingException with a redelivery count of zero; fifteen ledger reactions committed; the consumer''s storm.story.batch_isolated line for one batch of sixteen, one condemned, none redelivered, fifteen acked. Recovery one, messenger:failed:retry under the probe''s disarming flag on the replaying process alone, reports the transport handled and leaves it empty with no effect duplicated; recovery two, a second poison captured then messenger:failed:remove on its id, leaves it empty; a final drain captures nothing.'
+      recovery: 'Run make poison-message-recovery in the provisioned Bank checkout with POISON_MESSAGE_DATABASE_HOST and POISON_MESSAGE_BROKER_HOST declared. The marker-not-armed, batch-of-one and replay-omitted variants must fail.'
+      cleanup: 'The guarded wrapper bin/poison-message-smoke.sh holds a per-schema lock, refuses any schema outside smoke_poison_message_, resets before and drops after on any exit, preserving the original failure, and verifies the disposable resources are clean. Retire dedicated containers after preserving evidence.'
+  -
+    id: duplicate-delivery
+    title: 'Duplicate message delivery'
+    prevention:
+      state: available
+      kind: code
+      reference: 'Storm\Story\Middleware\DeduplicateConsumer with Storm\Chronicler\Inbox\DbalInboxStore::once(): the (consumer, message_id) mark and the handler''s effects commit in one transaction on the default connection, a redelivery is absorbed by the named conflict target and runs no handler; sagas dedupe by correlation and a broker send inside the inbox transaction is refused at the sender seam unless signed. Effects outside that connection stay at-least-once by contract.'
+    detection:
+      state: available
+      kind: structured_log
+      reference: 'Storm\Chronicler\Inbox\DbalInboxStore::once(); storm.chronicler.inbox_duplicate at info with the consumer, the message id and the row''s count; the es_inbox row keeps duplicates and last_duplicate_at; metrics storm_inbox_duplicates_skipped and storm_inbox_duplicate_rows beside storm_inbox_rows. The batched path, DbalBatchInboxStore::onceBatch(), skips its duplicates without counting them yet. A duplicate that BYPASSES the inbox leaves no trace here by construction: an effect applied twice is read on the affected aggregate or read model, not on the inbox.'
+    resolution:
+      state: available
+      kind: runbook
+      reference: 'docs/operations/duplicate-delivery.md'
+      preconditions: 'Read the es_inbox rows with duplicates > 0 and the two gauges before judging the count; tell the redelivery the inbox absorbed, which needs no repair, from the duplicate that bypassed it, read on the effect: an id minted afresh, a lane without the inbox, an effect outside the inbox transaction; look for the aggregate''s own reference key, which absorbs a duplicate without any trace.'
+      expected_result: 'An absorbed redelivery left alone, its producer stopped when the count climbs on a quiet system; a duplicate that reached an effect corrected by a compensating fact recorded once, or a read model rebuilt; a redelivery after the fix absorbed and counted, not applied.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:duplicate-delivery-recovery; merged revision b2b74b97c40e94d63b0b866a550cdead9c86d988, coordination issue 498.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; reserved smoke_duplicate_delivery_ schema, the events in sync and the command lane on the disposable broker, no resident workers or PostgreSQL clients, a drained seed baseline with nothing absorbed on es_inbox and both inbox gauges at zero, and the application log offset recorded so only what the run writes is read.'
+      hypothesis: 'A command delivered twice under one message id moves money once: the inbox absorbs the redelivery, counts it on its row, logs it and the metrics sum it. The same command under a fresh message id is invisible to the inbox, and the aggregate takes it as a no-op on its own hold reference, recording nothing.'
+      injection: 'Start a transfer, consume its command so the saga publishes the hold, set the published saga outbox row back to pending with its stored header and relay it again, so the command lane carries the hold twice under one message id; consume the lane. Then set it back once more with a fresh __message_id, relay and consume.'
+      observation: 'bank.funds_held once; the es_inbox row of the async consumer at duplicates 1 with last_duplicate_at set, the only row touched; exactly one storm.chronicler.inbox_duplicate line since the baseline naming that consumer, that message id and a count of one; storm_inbox_duplicates_skipped and storm_inbox_duplicate_rows at one; the transfer at done with one capture and the count unchanged through the completing rounds. Under the fresh id: the count unchanged, the hold still once, the account stream''s version unchanged.'
+      recovery: 'Run make duplicate-delivery-recovery in the provisioned Bank checkout with DUPLICATE_DELIVERY_DATABASE_HOST and DUPLICATE_DELIVERY_BROKER_HOST declared. The republish-omitted and id-rewritten variants must fail on the count.'
+      cleanup: 'The guarded wrapper bin/duplicate-delivery-smoke.sh holds a per-schema lock, refuses any schema outside smoke_duplicate_delivery_, resets before and drops after on any exit, preserving the original failure, and verifies the disposable resources are clean. Retire dedicated containers after preserving evidence.'
+  -
+    id: projection-stalled
+    title: 'Lagging or stopped projection'
+    prevention:
+      state: not_applicable
+      reason: 'Projection lag is a scheduling and capacity property of the deployment (the runner process, its lease, its scheduling, the load), not a failure the framework can prevent; the single cursor and checkpoint-together guarantees prevent skipping, which is the corruption, and the safe-head grace with the transaction_timeout warning of storm:install keeps slow writers out of the reader''s path.'
+      decision: 'Operations plan 377, decision 9996.'
+    detection:
+      state: available
+      kind: structured_log
+      reference: 'Storm\Telemetry\StormObservability::recordBatch; storm.projector.batch; empty scans are silent and do not prove liveness. storm_projection_lag measures against the safe-head floor event_store_high_water, which only a running projection tick advances: with every runner stopped the floor stands still and the metric reads 0 while the store is ahead (rehearsal on coordination issue 499). A stopped fleet is detected by the age of each projection heartbeat and by the gap between max(sequence_no) and the floor, not by the lag alone.'
+    resolution:
+      state: available
+      kind: console
+      reference: 'storm:projection:retry'
+      preconditions: 'The projection has failed and its underlying fault has been corrected. Inspect its status first. This preserves the checkpoint; it does not rebuild corrupted output.'
+      expected_result: 'The failed projection is re-armed at its retained checkpoint; verify progress separately.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:projection-lag-recovery; merged revision 4dacfdd35c3ef3fff124770a26bb132e7d3839a4, coordination issue 499.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; reserved smoke_projection_lag_ schema, synchronous event delivery, no resident workers or PostgreSQL clients, and a drained seed baseline with every projection at the safe head.'
+      hypothesis: 'Withholding one projection runner while events are delivered leaves the store ahead of that read model, the projection idle rather than failed, and its published lag silent until any runner advances the floor; one bounded drain restores the read model.'
+      injection: 'Produce, consume and deliver three 100-cent bank:deposit commands with the rm_account_balance runner withheld; assert nothing is pending or failed and the store grew by exactly six events, the deposits and their ledger reactions.'
+      observation: 'The account balance is unchanged and the projection status is idle. The safe head and storm_projection_lag both read 0 with no runner ticking. Running rm_ledger_balance moves the floor and the lag reads exactly six, the floor minus the checkpoint, while the account read model still has not moved.'
+      recovery: 'Run make projection-lag-recovery in the provisioned Bank checkout with PROJECTION_LAG_DATABASE_HOST, PROJECTION_LAG_BROKER_HOST and MESSENGER_EVENTS_DSN=sync:// declared. The scenario runs storm:projection:run rm_account_balance --drain once; the balance gains exactly 300 cents and the lag reads 0; a second drain changes nothing. The runner-not-withheld, recovery-omitted and floor-unmoved variants must fail.'
+      cleanup: 'The guarded wrapper bin/projection-lag-smoke.sh holds a per-schema lock, refuses any schema outside smoke_projection_lag_, resets before and drops after on any exit, preserving the original failure, and verifies the disposable resources are clean. Retire dedicated containers after preserving evidence.'
+  -
+    id: saga-waiting
+    title: 'Saga stuck waiting'
+    prevention:
+      state: not_applicable
+      reason: 'A saga waits for an event another party must produce, and the framework cannot prevent that event from never coming; what it does is bound every wait by what the application declares for it, the heartbeat that escalates without finalizing an effect-gating wait and the global deadline that halts or waives, and make the wait visible by state and idle time. A wait nobody bounded is the application''s declaration, not a framework failure.'
+      decision: 'Operations plan 377, decision 10062.'
+    detection:
+      state: available
+      kind: console
+      reference: 'storm:saga:list; storm:saga:inspect; operator inspection is not an autonomous liveness alert'
+    resolution:
+      state: available
+      kind: console
+      reference: 'storm:saga:unpark'
+      preconditions: 'Inspect the parked saga and correct its poison timer or handler first. Unparking does not redrive an arbitrary dead-lettered command.'
+      expected_result: 'The parked saga is eligible to resume; verify its next transition separately.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:saga-waiting-recovery; merged revision 4a14f8f77f331571d8a4a502e48d1d056d7dab0d, coordination issue 500.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; reserved smoke_saga_waiting_ schema, synchronous event delivery, no resident workers or PostgreSQL clients, and a drained seed baseline with no pending event or saga command.'
+      hypothesis: 'A saga whose awaited event never comes stays running at its wait and escalates on its heartbeat without failing, the operator listing finds it, and delivering the event is the whole recovery.'
+      injection: 'Start one 1000-cent bank:transfer, relay and execute its hold, then withhold the event relay; assert the saga at await_hold and running, exactly one bank.funds_held pending in es_outbox, and no saga command pending.'
+      observation: 'storm:saga:list names the waiting saga and the by-state count shows it; the aged await_hold heartbeat fired by storm:saga:timers leaves the saga at the same state and status with its heartbeat re-armed within the declared interval; no balance moved. The SagaAwaitEscalated announcement rides the telemetry lane and is not asserted here; it is covered by the framework''s unit tests. Recovery must leave no pending event, no open transfer saga, exactly 1000 cents moved once; a second drain changes nothing.'
+      recovery: 'Run make saga-waiting-recovery in the provisioned Bank checkout with SAGA_WAITING_DATABASE_HOST, SAGA_WAITING_BROKER_HOST and MESSENGER_EVENTS_DSN=sync:// declared. The scenario runs storm:outbox:relay once to deliver the event, then the saga relay, the consumer and the event relay in at most four rounds. The event-relay-not-withheld, recovery-omitted and heartbeat-not-fired variants must fail.'
+      cleanup: 'The guarded wrapper bin/saga-waiting-smoke.sh holds a per-schema lock, refuses any schema outside smoke_saga_waiting_, resets before and drops after on any exit, preserving the original failure, and verifies the disposable resources are clean. Retire dedicated containers after preserving evidence.'
+  -
+    id: event-outbox-lag
+    title: 'Event outbox relay lag'
+    prevention:
+      state: not_applicable
+      reason: 'Relay lag is an availability property of the deployment, the draining process, its scheduling, the broker and capacity, not a failure the framework can prevent; it guarantees no loss and no reordering, detects lag and bounds its recovery.'
+      decision: 'Operations plan 377, decision 9969.'
+    detection:
+      state: available
+      kind: healthcheck
+      reference: 'Storm\Telemetry\Health\OutboxLivenessHealthCheck::check(), outbox_liveness. Local event-database probe qualified before and after recovery; no alert delivery or production-threshold calibration claimed. See docs/operations/outbox-lag.md.'
+    resolution:
+      state: available
+      kind: runbook
+      reference: 'docs/operations/outbox-lag.md'
+      preconditions: 'Verify the application database, schema, runtime, transport and worker ownership; record the affected event cohort and resolve the diagnosed cause before draining.'
+      expected_result: 'The affected pending cohort is cleared, no unresolved failed or stalled rows remain, and downstream receipts and business observations confirm delivery; a successful command exit alone is insufficient.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:outbox-lag-recovery; merged revision 2eba7479c7812e943c8e537a9c2d55ba307373a3, coordination issue 513.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; reserved smoke_outbox_lag_ schema, consistent Symfony and Make broker configuration, no resident workers, and a drained seed baseline.'
+      hypothesis: 'Withholding the event relay retains deposit events and delays their ledger reactions; bounded recovery restores the expected business effects.'
+      injection: 'Produce and consume three 100-cent bank:deposit commands without relaying their events; assert the three pending positions belong to those deposits.'
+      observation: 'Pending cohort remains present while ledger effects are absent. Recovery must produce exactly 300 additional cents in the account, cash and deposit-liability balances and exactly three ledger events, with no pending or failed work. A second drain leaves these results unchanged.'
+      recovery: 'Run make smoke-all ONLY=outbox-lag-recovery SMOKE_SCHEMA=smoke_outbox_lag_demo in the provisioned Bank checkout. The scenario invokes the real event relay with batch 100 for at most three rounds; event handlers execute synchronously on publication. Omitted recovery and premature-drain variants must fail.'
+      cleanup: 'The guarded wrapper resets and removes its disposable schemas and queues on success or failure, preserving the original failure. The existing reset also clears checkout caches, logs and sibling _logs; all must belong to the disposable workspace. Inspect failed cleanup before reuse and retire dedicated resources after preserving evidence.'
+  -
+    id: idle-outbox-dead
+    title: 'Dead event relay on an idle system'
+    prevention:
+      state: not_applicable
+      reason: 'A relay''s life belongs to the deployment''s supervisor, which restarts, recycles and logs its exit; the framework cannot keep a process alive, and prevents nothing here. What it does is make the death visible with no work to relay: the heartbeat every drain writes, the outbox_relay_liveness check and the tick-age metric, and the runbook that tells dead from idle.'
+      decision: 'Operations plan 377, decision 10016.'
+    detection:
+      state: available
+      kind: healthcheck
+      reference: 'Storm\Telemetry\Health\OutboxRelayLivenessHealthCheck::check(), outbox_relay_liveness, read from es_outbox_relay, the heartbeat every drain of storm:outbox:relay upserts whether or not it found work; Degraded with no heartbeat or when the freshest is older than the threshold, 300 seconds by default. Metric storm_outbox_relay_tick_age_seconds, no sample before the first tick. Local qualification on an empty outbox in the integration suite; no alert delivery or production-threshold calibration claimed.'
+    resolution:
+      state: available
+      kind: runbook
+      reference: 'docs/operations/relay-silence.md'
+      preconditions: 'Read the heartbeat, outbox_relay_liveness or es_outbox_relay, to tell a dead relay from an idle one, a wedged process from an absent one, and a relay that never ran from one that stopped; verify the database and schema the relay and the writers share; a green backlog signal establishes nothing here.'
+      expected_result: 'The relay runs again under its supervisor: the heartbeat age falls below the threshold, outbox_relay_liveness answers Ok naming the last tick and keeps doing so on following samples; one hand-run drain proves one tick, not a living relay. Work that arrived during the silence is verified by the backlog runbook.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:relay-silence; merged revision 66e8d85788a67f09efb31d35b7359313a20b54ac, coordination issue 502.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; reserved smoke_relay_silence_ schema, synchronous event delivery, no resident workers or PostgreSQL clients, and a drained seed baseline whose relay has just ticked with a relayed total above zero.'
+      hypothesis: 'A relay that never runs again on an idle outbox is invisible to the backlog signals and visible to its heartbeat, and one relay run is the whole recovery.'
+      injection: 'Let a few seconds pass with no relay run and no work; assert nothing became pending or failed.'
+      observation: 'outbox_liveness reads Ok and storm_outbox_events_oldest_pending_age_seconds reads 0 while the relay is dead; storm_outbox_relay_tick_age_seconds climbs with the silence; outbox_relay_liveness at its default threshold still reads Ok, the accepted blind window, and at a two-second threshold reads Degraded naming the last tick and the threshold.'
+      recovery: 'Run make relay-silence in the provisioned Bank checkout with RELAY_SILENCE_DATABASE_HOST, RELAY_SILENCE_BROKER_HOST and MESSENGER_EVENTS_DSN=sync:// declared. The scenario runs storm:outbox:relay once; the heartbeat age falls under the threshold, the check reads Ok, the relayed total is unchanged and nothing is pending. The relay-not-silent and restart-omitted variants must fail.'
+      cleanup: 'The guarded wrapper bin/relay-silence-smoke.sh holds a per-schema lock, refuses any schema outside smoke_relay_silence_, resets before and drops after on any exit, preserving the original failure, and verifies the disposable resources are clean. Retire dedicated containers after preserving evidence.'
+  -
+    id: saga-command-outbox
+    title: 'Saga command outbox lag'
+    prevention:
+      state: not_applicable
+      reason: 'Saga command relay lag is an availability property of the deployment, the draining process, its scheduling, the command bus and capacity, not a failure the framework can prevent; it guarantees no lost and no doubly sent command, detects lag and dead letters, and bounds the recovery.'
+      decision: 'Operations plan 377, decision 10043.'
+    detection:
+      state: available
+      kind: healthcheck
+      reference: 'Storm\Telemetry\Health\SagaOutboxLivenessHealthCheck::check(), saga_outbox_liveness, the twin of outbox_liveness over workflow_outbox: Degraded first on failed rows, naming storm:saga:inspect and storm:saga:redrive, then on the oldest pending command older than the threshold, 300 seconds by default; Ok with its reason when the saga module is not installed. Metric storm_saga_outbox_oldest_pending_age_seconds, 0 when none. Local qualification in the integration suite; no alert delivery or production-threshold calibration claimed.'
+    resolution:
+      state: available
+      kind: runbook
+      reference: 'docs/operations/saga-outbox-lag.md'
+      preconditions: 'Verify the application database, schema, runtime, command bus and relay ownership; tell lag from an operator freeze, whose pending rows the relay leaves unclaimed on purpose, and from back-off; record the affected correlations; for a failed row, inspect the saga and its evidence before any redrive, whose four guards decide.'
+      expected_result: 'The affected pending cohort is dispatched and the sagas left the state that issued the commands; no unresolved failed row remains; each command''s business effect is observed exactly once from its target, never from a published row; a zero exit alone is insufficient.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:saga-outbox-lag-recovery; merged revision cd91a5cc860dd890e79d368b91bd1b34598c1fb6, coordination issue 503.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; reserved smoke_saga_outbox_lag_ schema, synchronous event delivery, no resident workers or PostgreSQL clients, and a drained seed baseline with no pending or failed saga command and saga_outbox_liveness reading Ok.'
+      hypothesis: 'Withholding the saga command relay holds a transfer at its first step with its hold command pending, degrades the saga outbox check, and bounded recovery carries the transfer to its end exactly once.'
+      injection: 'Start one 1000-cent bank:transfer and consume its command without running storm:saga:relay; assert exactly one pending command, the transfer saga''s, and the saga at await_hold.'
+      observation: 'No balance moved; saga_outbox_liveness reads Degraded naming the oldest pending saga command; no dead letter anywhere. Recovery must leave no pending command and no open transfer saga, read Ok with its healthy message, and move exactly 1000 cents from source to destination once; a second recovery leaves everything unchanged.'
+      recovery: 'Run make saga-outbox-lag-recovery in the provisioned Bank checkout with SAGA_OUTBOX_LAG_DATABASE_HOST, SAGA_OUTBOX_LAG_BROKER_HOST and MESSENGER_EVENTS_DSN=sync:// declared. The scenario runs storm:saga:relay, the command consumer and storm:outbox:relay in at most four rounds for the transfer''s three legs. The relay-not-withheld and recovery-omitted variants must fail.'
+      cleanup: 'The guarded wrapper bin/saga-outbox-lag-smoke.sh holds a per-schema lock, refuses any schema outside smoke_saga_outbox_lag_, resets before and drops after on any exit, preserving the original failure, and verifies the disposable resources are clean. Retire dedicated containers after preserving evidence.'
+  -
+    id: broker-unavailable
+    title: 'AMQP broker unavailable'
+    prevention:
+      state: not_applicable
+      reason: 'A broker that stops answering is an availability property of the deployment, its node, its network, its credentials, which the framework cannot prevent; what it guarantees is that the outage withholds and never loses: events and their publication intent commit together in the append transaction, saga commands land in their outbox, and the relays retry with a back-off once the broker is back. The relays never turn the outage into an operator''s replay: a publish failure whose cause chain names the transport, the connection or the database is never dead-lettered, whatever the attempt count, so a withheld row waits in its outbox while both consoles exit non-zero.'
+      decision: 'Operations plan 377, decision 10302.'
+    detection:
+      state: available
+      kind: healthcheck
+      reference: 'Storm\Symfony\Health\EventsTransportHealthCheck::check(), events_transport, wired for the transport storm.outbox.events_transport names: Ok with the queued count when the broker answers, Degraded naming the exception class when it does not, the write path never depending on the broker, Ok with its reason when the transport cannot count. Storm\Telemetry\Health\OutboxPublishHealthCheck::check(), outbox_publish: Degraded from the first pending row of es_outbox or workflow_outbox that failed a publish, naming each relay''s count and its own last error; dead letters stay the liveness checks'' business. Gauges storm_outbox_events_backing_off and storm_saga_outbox_backing_off. Log tokens storm.outbox.publish_failed and storm.saga.publish_failed at warning, with the partition or the correlation, the attempt and the budget. The attempt budget never dead-letters a withheld row, a publish failure naming the transport, the connection or the database keeping its row pending whatever the count, so a failed row under an outage is a poison the outage exposed; storm:outbox:relay and storm:saga:relay both exit non-zero on the same stopped-on-a-publish-error line, carrying the counts they committed first. Unit-qualified on a counting transport and integration-qualified on real outboxes; no alert delivery claimed.'
+    resolution:
+      state: available
+      kind: runbook
+      reference: 'docs/operations/broker-unavailable.md'
+      preconditions: 'Read the broker through events_transport and the attempts through outbox_publish before the backlog checks, which stay Ok inside their threshold; record the pending and failed counts of both outboxes as the baseline; a failed row appearing under the outage is a poison the outage exposed and never the outage itself, since a transport failure keeps its row pending.'
+      expected_result: 'The broker answering, the relays draining their pending tails in order and exiting zero, the consumers back, every withheld effect observed once at its target, no pending older than the recovery and no failed row; a row the outage exposed as poison replayed by its own procedure, storm:outbox:failed --retry for an event and storm:saga:redrive under its four guards for a command.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:broker-unavailable-recovery; merged revision f756aaea61ad7c2f6ac5525597c97a7c5129ec33, coordination issues 504 and 529.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; the read-model database created before the run; reserved smoke_broker_unavailable_ schema, every lane on the disposable broker, no resident workers or PostgreSQL clients, a drained seed baseline with both outboxes clean and the events queue empty.'
+      hypothesis: 'An unreachable broker withholds, never loses and never becomes an operator''s replay: both relays fail forward per partition head and exit non-zero on the same publish error, the consumer cannot start and the broker keeps what it held; kept unreachable well past the attempt budget the withheld rows stay pending with their attempts climbing and their back-off capped, neither outbox dead-lettering; once the broker answers, the relays drain by themselves and every reaction is applied exactly once.'
+      injection: 'Dispatch five 100-cent deposits and a transfer, consume the commands, relay one event into the broker; then run both relays and the batched consumer in processes whose every AMQP lane is rewritten onto a host that resolves to nothing, the inherited dotenv variable list dropped; relay both lanes again under the outage up to the eighth attempt, three past the budget, waiting out each back-off on both outboxes.'
+      observation: 'Under the outage: storm:outbox:relay and storm:saga:relay both exit non-zero on the same stopped-on-a-publish-error line, one attempt, one error and one back-off per partition head and on the hold, pending unchanged and nothing failed on either outbox, the pending gauge right, outbox_publish Degraded naming both relays, outbox_liveness Ok inside its threshold; the batched consumer exits non-zero, the queued event stays, no reaction runs. At eight attempts: every withheld row still pending, each partition head and the hold carrying eight attempts, both back-off windows inside the 60-second cap, storm_outbox_events_backing_off counting the heads, neither outbox holding a dead letter, and outbox_liveness naming a lagging relay rather than a dead letter, the outage having outlasted its threshold. Back: the first tick publishes nothing, every row still cooling; storm:outbox:failed lists nothing to replay; once the back-off has passed one relay run drains the five withheld rows and the saga relay dispatches the hold, five ledger reactions and one hold applied exactly once, the queue empty, both outboxes clean. The run qualifies the withholding and the recovery, not the classification: one cause is exhibited, a broker host that resolves to nothing, and no poison is planted beside it.'
+      recovery: 'Run make broker-unavailable-recovery in the provisioned Bank checkout with BROKER_UNAVAILABLE_DATABASE_HOST and BROKER_UNAVAILABLE_BROKER_HOST declared, the read-model database created beforehand. The outage-omitted, recovery-omitted and dead-letter-expected variants must fail. Every back-off is waited for real, about three minutes of a seven-minute run; the backlog blind window at the far end of a long outage is witnessed one attempt in only.'
+      cleanup: 'The guarded wrapper bin/broker-unavailable-smoke.sh holds a per-schema lock, refuses any schema outside smoke_broker_unavailable_, resets before and drops after on any exit, preserving the original failure, and verifies the disposable resources are clean. The broker process is not stopped, so a restart with durable queues is not rehearsed. Retire dedicated containers after preserving evidence.'
+  -
+    id: database-capacity
+    title: 'Full database or hot partition'
+    prevention:
+      state: available
+      kind: document
+      reference: 'docs/operations/commands.md: storm:event-store:partition; partition early before the DEFAULT partition contains the category'
+    detection:
+      state: available
+      kind: healthcheck
+      reference: 'Storm\Telemetry\Health\EventStorePartitionHealthCheck::check(), event_store_partitions: Degraded from the first row event_store_default holds, naming the categories never partitioned and the command that prints their migration; Ok when it is empty. Gauges storm_event_store_partition_bytes{partition}, storm_event_store_default_rows{category} and storm_database_bytes, the last compared to the volume''s capacity by the deployment''s own alert. The wall itself, an append refused for lack of space, is read where the bench showed it lands: the handler fails, the worker retries and the command reaches the failure transport, failed_messages Degraded and the captured error naming the space; a full data volume with the write-ahead log on it kills the server, read by the database check. Integration-qualified on a real store; no alert delivery claimed.'
+    resolution:
+      state: available
+      kind: runbook
+      reference: 'docs/operations/database-capacity.md'
+      preconditions: 'Read capacity where it grows, the partition sizes, the DEFAULT rows per category and the database size against the volume, and the failure transport for the appends the wall refused; record them as the baseline; tell a refused append from a server killed by a full data volume carrying the write-ahead log.'
+      expected_result: 'The volume freed by the sweeps and the platform, never by deleting event rows; the captured commands replayed once, never purged; the categories the DEFAULT partition held partitioned by the command''s recipe off-peak, or left there by a recorded decision; the projections past the burned sequence numbers once the safe-head grace has passed.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:database-capacity-recovery; merged revision 6c81930169e7c87ef4b628e2c48403be37e87e80, coordination issue 505.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL carrying a small separate volume with an empty tablespace named hot, RabbitMQ and Redis; reserved smoke_database_capacity_ schema, the events in sync, no resident workers or PostgreSQL clients, a drained seed baseline, the failure transport empty and the volume empty.'
+      hypothesis: 'A full volume under the DEFAULT partition refuses an append into a category living there, whole or not at all, the command retried by its worker then captured on the failure transport naming the space, while a category partitioned onto the main volume keeps appending; the volume freed, every captured command replays once; the streams still run 1..N and the projections cross the burned sequence numbers once the safe-head grace has passed.'
+      injection: 'Read what the DEFAULT partition holds, move it onto the hot tablespace, fill the volume with a session temporary table down to less than a page; queue forty identity renames and run a worker in rounds with the drained-stop lever off until every rename is recorded or captured; dispatch one deposit on the partitioned account category and consume it.'
+      observation: 'The first renames recorded whole, the rest captured on the failure transport with No space left on device in their body, applied plus captured equal to forty, no publication intent without its event, the deposit recorded on the main volume. After the volume is freed: messenger:failed:retry reports the transport handled and empties it, forty renames recorded in all, the DEFAULT partition back on pg_default and the volume empty, the partition command verifying its four categories, the deposit''s reaction applied once, every identity stream the run 1..N with its head agreeing, the identity projection stopped at the floor on its first tick and at the end of the store after the safe-head grace.'
+      recovery: 'Run make database-capacity-recovery in the provisioned Bank checkout with DATABASE_CAPACITY_DATABASE_HOST and DATABASE_CAPACITY_BROKER_HOST declared. The ballast-omitted and volume-not-freed variants must fail.'
+      cleanup: 'The guarded wrapper bin/database-capacity-smoke.sh holds a per-schema lock, refuses any schema outside smoke_database_capacity_, resets before and drops after on any exit, preserving the original failure, and verifies the disposable resources clean and the separate volume empty. The data volume itself is not filled, which kills the server. Retire dedicated containers after preserving evidence.'
+  -
+    id: schema-drift
+    title: 'Schema drift'
+    prevention:
+      state: available
+      kind: code
+      reference: src/Support/Dbal/SchemaProbe.php
+    detection:
+      state: available
+      kind: healthcheck
+      reference: 'Storm\Telemetry\Health\SchemaConformanceHealthCheck::check(), schema_conformance, wired by the bundle with one target per installed module, core, projections on a split read-model store, saga, telemetry: the installers'' own catalog interrogation run between two installs, Degraded from the first divergence naming the module, the problems and the installer whose re-run converges what its DDL recreates; Ok naming the modules verified; a module whose tables are absent reads as not installed. Gauge storm_schema_problems{module}. What the probe does not read, a column added by hand on a Storm table, this check does not read either. Integration-qualified on a real schema drifted by hand; no alert delivery claimed.'
+    resolution:
+      state: available
+      kind: runbook
+      reference: 'docs/operations/schema-drift.md'
+      preconditions: 'Read the drift where it is declared, the schema_conformance check and the installers'' own refusal, then inspect the named object in the catalogs; record the problems, the rows and a fingerprint of the tables named as the baseline; tell an additive drift the installer converges from a structural one only a hand undoes; back up the table before any structural repair; never a reset, which drops the event store, and never --force, which confirms a drop and repairs nothing.'
+      expected_result: 'Every installer re-run says installed and verified, schema_conformance Ok naming every installed module and storm_schema_problems at zero; the rows and the fingerprints of the tables named read against the baseline, nothing lost or duplicated; a write that failed during the drift replayed once.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:schema-drift-recovery; merged revision f7172d53aea6cb80b2e539e39180da623efa5363, coordination issue 506.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; reserved smoke_schema_drift_ schema, the events in sync, no resident workers or PostgreSQL clients, a drained seed baseline, the schema proven by a re-install and a fingerprint of the inbox and outbox content.'
+      hypothesis: 'A schema drifted by hand between two installs is silent to every surface while the application keeps writing; a re-install converges the additive drift its DDL recreates and refuses the structural one, naming it and touching nothing; the compatible repair by hand gives the declared shape back with every row intact, and the re-install verifies.'
+      injection: 'Drop the es_inbox age index and its duplicates check by hand, deposit, re-install; change es_outbox.attempts to bigint by hand, deposit, re-install; give the type back by hand, re-install, deposit.'
+      observation: 'Under both drifts the database check reads Ok and the deposit is recorded; under the additive drift a negative duplicate count the check forbids is accepted; the re-install recreates the index and the check, refuses the negative count again and leaves the content as fingerprinted; the re-install under the type drift exits non-zero saying the schema did not verify and naming attempts, the column still bigint and the content untouched; after the repair the type reads integer, the re-install says installed and verified, the content reads as fingerprinted plus the deposits, and a deposit is recorded.'
+      recovery: 'Run make schema-drift-recovery in the provisioned Bank checkout with SCHEMA_DRIFT_DATABASE_HOST and SCHEMA_DRIFT_BROKER_HOST declared. The repair-omitted and wrong-repair variants must fail, each naming the type it left.'
+      cleanup: 'The guarded wrapper bin/schema-drift-smoke.sh holds a per-schema lock, refuses any schema outside smoke_schema_drift_, resets before and drops after on any exit, preserving the original failure, and verifies the disposable resources are clean. Retire dedicated containers after preserving evidence.'
+  -
+    id: snapshot-inconsistent
+    title: 'Snapshot and stream inconsistency'
+    prevention:
+      state: available
+      kind: code
+      reference: src/AggregateRepository/Snapshot/PgSnapshotStreamFence.php
+    detection:
+      state: available
+      kind: healthcheck
+      reference: 'Storm\Telemetry\Health\SnapshotOrphanHealthCheck::check(), snapshot_orphans, Degraded from the first snapshot whose stream head is gone naming the count and storm:snapshot:prune-orphans, the structural backstop; gauge storm_snapshots{status=retained|orphaned}. The lie the head probe cannot see, a snapshot whose state contradicts the stream at a version the head still holds, is read by storm:snapshot:verify: a sample of snapshots refolded from the first event to the snapshot version and compared to the stored state key by key, FAILURE naming the stream and the keys that differ, changing nothing. Integration-qualified on a snapshot made to lie and on an orphan; no alert delivery claimed, and the verifier reads on demand, not on a schedule.'
+    resolution:
+      state: available
+      kind: runbook
+      reference: 'docs/operations/snapshot-inconsistent.md'
+      preconditions: 'Read before changing anything: storm:snapshot:verify on the category, the prune''s dry run, the snapshot row and the head of the named stream, recorded as the baseline; tell a lying snapshot from a projection disagreeing on its own; never rewrite a snapshot''s state by hand and never sweep before the discard.'
+      expected_result: 'The lying snapshot discarded by storm:snapshot:discard, the stream refolded from its first event on the next load and the sweep retaking a snapshot at the head with no new drift; the orphans pruned; a whole aggregate type lying the same way repaired by its schema bump, not one row at a time; verify naming nothing afterwards.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:snapshot-inconsistent-recovery; merged revision e3e4fe95fe031fc5fc3f637b5b5c733ecb44f7c5, coordination issue 507.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; reserved smoke_snapshot_inconsistent_ schema, the events in sync, no resident workers or PostgreSQL clients, a drained seed baseline with no snapshot and no orphan.'
+      hypothesis: 'A snapshot whose state is rewritten at a version the head still holds passes the head probe and is restored, and only the application''s own three-way reconcile says so; discarded, the sweep retakes it at the head with no new drift, the stream''s whole height counting as drift, and the reconcile agrees again; an orphaned snapshot is counted by the prune''s dry run and pruned, the account''s own snapshot untouched.'
+      injection: 'Drift the account past the threshold, sweep, add a short tail and drain the balance projection; rewrite snapshots.state by hand adding a lie to the balance at the snapshot''s version; delete the row by hand and sweep; insert a snapshot row for a stream no head has.'
+      observation: 'The version unchanged and held by the head after the lie; the reconcile exits non-zero naming MISMATCH; after the discard the sweep retakes the snapshot at the head with the head unmoved and the reconcile exits zero; the prune''s dry run counts exactly one orphan and deletes nothing; the prune removes it and leaves the account''s snapshot.'
+      recovery: 'Run make snapshot-inconsistent-recovery in the provisioned Bank checkout with SNAPSHOT_INCONSISTENT_DATABASE_HOST, SNAPSHOT_INCONSISTENT_BROKER_HOST and MESSENGER_EVENTS_DSN=sync:// declared. The discard-omitted and prune-omitted variants must fail. The discard is a raw DELETE, storm:snapshot:discard having shipped after the rehearsal; the orphan is read through the prune, not the health check.'
+      cleanup: 'bin/snapshot-inconsistent-smoke.sh takes a per-schema lock, resets the reserved schema before the run and drops it and the queues after, unsuccessful runs included.'
+  -
+    id: process-frozen
+    title: 'Frozen long-running process'
+    prevention:
+      state: available
+      kind: code
+      reference: 'src/Projector/Store/DbalProjectionStore.php: the runner lease, renewed every cycle and claimable by another runner once expired, so a frozen runner holds a projection for one TTL and no longer; the deployment rules, every loop bounded in time and memory and recycled by its manager, so a frozen one-shot holds its slot for one relaunch. The freeze itself is the host''s: a frozen process honors no limit of its own, and what these prevent is the freeze becoming a silent outage. Qualified by the Bank rehearsal''s takeover.'
+    detection:
+      state: available
+      kind: healthcheck
+      reference: 'Storm\Telemetry\Health\ProjectionRunnerLivenessHealthCheck::check(), projection_runner_liveness: a running projection whose lease expired under a stopped heartbeat, the runner stopped without exiting or dead without releasing; Degraded from the first one naming the projection, the heartbeat age and the recovery, the frozen process recycled first, then the takeover, storm:projection:run <name> --drain; Ok naming how many run with a live lease. Gauges storm_projection_heartbeat_age_seconds{projection} and storm_projection_lease_expired{projection}. The lag cannot carry it: the safe-head floor is ratcheted by the runner''s own tick, so storm_projection_lag reads zero over what a frozen sole runner leaves unfolded. A frozen one-shot relay under the process manager''s loop is read by its own heartbeat, outbox_relay_liveness and saga_outbox_liveness; a frozen consumer has no heartbeat in Storm and is the broker''s and the supervisor''s to read. Integration-qualified on planted leases; no alert delivery claimed.'
+    resolution:
+      state: available
+      kind: runbook
+      reference: 'docs/operations/process-frozen.md'
+      preconditions: 'Read which process froze and how: the runner liveness check and storm:projection:status for a projection runner, the relay heartbeat checks for a relay, the broker''s queue for a consumer; pg_stat_activity for a backend of the frozen process left in a transaction, the locks it holds; record the projection''s status, lease and position and the supervisor''s view as the baseline; never read the lag for a frozen sole runner.'
+      expected_result: 'The frozen process recycled first, then a runner frozen between cycles taken over by a second runner claiming its expired lease, the thawed one exiting clean on its lost lease; a runner frozen inside its checkpoint freed by its backend terminated or its process recycled, the takeover then running; a runner thawed unrescued resuming its own lease; a relay or a consumer recycled under its supervisor; nothing folded twice, no row rewritten by hand.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:process-frozen-recovery; merged revision 56dcf7fe183b4fc101991237ae1dcb2f4497d1f3, coordination issues 508 and 528.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; the read-model database created before the run, the guarded entry checking isolation before the reset that would create it; reserved smoke_process_frozen_ schema, the events in sync, no resident workers or PostgreSQL clients, a drained seed baseline with the balance projection at the head.'
+      hypothesis: 'A projection daemon stopped by a signal without exiting keeps its process and its running status while its heartbeat stops and its lease expires; the lag reads zero over what it leaves unfolded, the safe-head floor being ratcheted by the frozen runner''s own tick, while the store''s head shows the gap; thawed with its lease unclaimed it resumes its own lease and folds the gap; a second runner claims the expired lease and catches up, and the thawed daemon exits non-zero on its lost lease, naming the hand-off and tying that exit to the supervisor, without moving the position, marking the projection failed or taking the lease back, the new owner then folding what lands after it; a runner frozen inside its checkpoint holds the row lock, the takeover blocks on it, and only the backend terminated frees it.'
+      injection: 'Start the balance projection as a daemon under a three-second lease as owner frozen-to-be, fold five deposits; SIGSTOP the daemon, five more deposits, one TTL plus a second; SIGCONT with the lease unclaimed; SIGSTOP again, a rescue runner in drain mode, SIGCONT; five deposits after the hand-off and the rescue runner again; then a stand-in session holding the checkpoint row FOR UPDATE in an open transaction, five deposits, a rescue runner bounded to eight seconds, pg_terminate_backend on the holder, a rescue runner again.'
+      observation: 'Frozen: process alive, status running, lease owner unchanged, lease expired, heartbeat older than the TTL, balance unmoved, lag zero over a gap of five events. Thawed unrescued: the deposits folded, the process alive, the lease live again under the same owner. Rescued: the rescue exits zero, the balance carries every deposit, the gap zero; the thawed daemon exits 1 within thirty seconds, its output naming the hand-off, another worker claiming its lease mid-run, and saying the non-zero exit is what makes a supervisor relaunch it, the position and the balance unchanged, the status not failed, the lease not taken back; the new owner then folds the five deposits that land after the hand-off and reaches the head. Locked: the bounded rescue times out folding nothing; terminated, the next rescue folds the five and reaches the head.'
+      recovery: 'Run make process-frozen-recovery in the provisioned Bank checkout with PROCESS_FROZEN_DATABASE_HOST, PROCESS_FROZEN_BROKER_HOST and MESSENGER_EVENTS_DSN=sync:// declared. The exit-zero-expected variant must fail on the exit the runner gives; the takeover-omitted variant must fail at the thaw, the daemon still running; the freeze-omitted variant must fail on the lease still live. A stop signal never lands inside a transaction on cue, hence the stand-in session. The takeover is a drain runner that has released its lease by the time the frozen one thaws, so the thawed daemon finds no owner rather than another one; the runner raises LeaseLost and exits non-zero either way.'
+      cleanup: 'bin/process-frozen-smoke.sh takes a per-schema lock, resets the reserved schema before the run, thaws and stops the daemon on any exit, and drops the schema and the queues after, unsuccessful runs included.'
+  -
+    id: dependency-breakage
+    title: 'Breaking dependency upgrade'
+    prevention:
+      state: available
+      kind: code
+      reference: 'src/Chronicler/Evolution/CatalogueCompatibility.php through storm:message:check on the pull request: the message contract this revision publishes against the one the previous revision published, refused when an alias lost its class under a personal declaration, its version''s upcaster, a replacement or a personal key, with no store needed; the application''s tracked catalogue and schema dump drift tests keep the documents bound to their sources. What no gate prevents: a change of meaning under a stable alias and version, and a path dependency whose lock records a commit the running checkout is not, which the dependency watch and the fork-as-remote decision own.'
+    detection:
+      state: available
+      kind: console
+      reference: 'storm:upcaster:verify at deploy, the rows read against this binary''s upcaster chain, each unreadable type named, above what the binary knows or below what the chain covers, with a machine verdict under --json; storm:saga:validate, every declared workflow assembled; storm:install re-run, the schema converged. A break that reached production shows as messages captured on the failure transport, failed_messages and storm_failed_messages. Qualified by the Bank rehearsal on planted traces; no alert delivery claimed.'
+    resolution:
+      state: available
+      kind: runbook
+      reference: 'docs/operations/dependency-breakage.md'
+      preconditions: 'Read the lock''s reference against the running checkout for every path dependency, then the three gates on the binary in question, the check against the previous revision''s catalogue, verify with its machine verdict, validate; read the failure transport for what a break that reached production captured; record them as the baseline; never edit a stored row to fit a binary, never silence a gate to deploy.'
+      expected_result: 'A refused check kept off the main line until the declaration is restored or shipped with what the matrix asks; a refused verify answered by rolling the binary forward for rows above what it knows or back for a bump without its upcaster, the upcaster then shipped; a refused validate repaired before deploy; captured messages retried once the binary reads them, never purged; the lock and the checkout agreeing, the gates green on the result.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:dependency-breakage-recovery; merged revision 220691a5ab178b00555b01986907733125db7e08, coordination issue 509.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; reserved smoke_dependency_breakage_ schema, the events in sync, no resident workers or PostgreSQL clients, a drained seed baseline, the framework consumed as a symlinked path repository from the sibling checkout.'
+      hypothesis: 'A pre-1.0 dependency broken under an upgrade leaves traces each deploy gate reads before a request pays: the lock records a commit the running checkout is not; a message contract that lost what the previous revision declared is refused by the check with no store; a row at a version the binary does not know and a row from before a bump that shipped no upcaster are refused by verify, each named; the workflows assemble; the rollback, the previous shapes restored, reads every gate green.'
+      injection: 'Read the lock''s reference for the framework against the sibling''s HEAD; write the current catalog and copy it as the previous revision''s, then add a personal key to its first personal alias; copy a real account row onto a fresh stream of its category at event version 99, and a row of a type declared at version 2 at version 1; a row at event version 0 attempted against the schema.'
+      observation: 'The two commits differ; the check exits 1 naming the alias and the key with the compatibility wording; verify exits 1 with conformant false and two problems naming the future row''s type and version and the type whose step no upcaster covers; the schema refuses version 0; after the baseline copied back and the rows and heads deleted, check, verify and validate exit 0.'
+      recovery: 'Run make dependency-breakage-recovery in the provisioned Bank checkout with DEPENDENCY_BREAKAGE_DATABASE_HOST, DEPENDENCY_BREAKAGE_BROKER_HOST and MESSENGER_EVENTS_DSN=sync:// declared. The contract-unchanged and future-row-omitted variants must fail. The upgrade itself is not run, the sibling being bound read-only; the planted rows are deleted, a stand-in the disposable schema affords, the production rollback being the binary''s and never the rows''.'
+      cleanup: 'bin/dependency-breakage-smoke.sh takes a per-schema lock, resets the reserved schema before the run, removes the rehearsal documents, and drops the schema and the queues after, unsuccessful runs included.'
+  -
+    id: clock-jump
+    title: 'Clock drift or discontinuity'
+    prevention:
+      state: available
+      kind: code
+      reference: 'src/Chronicler/SafeHead/SafeHeadAdvancer.php with src/Chronicler/Schema/EventStoreSchema.php: commit order is the sequence number and the safe head, never an occurrence time, so a clock that jumps moves no event and no read of the store; the two time authorities are kept apart, the application clock for the instants the domain and the workflows author, the database clock for the heartbeats and the leases, so a jump of one host reaches only what that host mints. What no code prevents: the saga timers, armed and claimed by the application clock, fire against a jump; the host''s time daemon is the prevention of the jump itself.'
+    detection:
+      state: available
+      kind: healthcheck
+      reference: 'Storm\Telemetry\Health\ClockSkewHealthCheck::check(), clock_skew: the application''s clock against the database''s, one clock_timestamp() bracketed by two now(), the round trip cancelling; Degraded from five seconds of skew, naming the direction and the seconds and what it moves, the saga timers armed and claimed by the application clock; gauge storm_clock_skew_seconds, signed, a jump as a step and a drift as a slope. What it reads is the application host against the database host, not either against true time: two hosts that jump together read as agreeing. Integration-qualified on a frozen application clock ahead and behind; no alert delivery claimed.'
+    resolution:
+      state: available
+      kind: runbook
+      reference: 'docs/operations/clock-jump.md'
+      preconditions: 'Read the two clocks against each other and which host moved by its time daemon; storm:saga:timers:audit for the timers armed beyond their tempo, storm:saga:list for the sagas a jump halted; record them as the baseline; fix the host''s time before anything else, never edit a timer by hand, never run the timers under a clock still ahead.'
+      expected_result: 'The host''s time fixed; the timers beyond their tempo brought to now by storm:saga:timers:audit --rearm and fired by the next timers run, the ordinary re-arm following; the sagas a jump halted listed, their holdings reclaimed by the application''s own sweep and their operations re-issued by the business, a halt being terminal; the relays and the runners untouched, their heartbeats and leases being the database''s.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:clock-jump-recovery; merged revision ca3d32f0cd2588ad3cc355cd42cfdf8a4f2d3da5, coordination issue 510.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; reserved smoke_clock_jump_ schema, the events in sync, no resident workers or PostgreSQL clients, a drained seed baseline, the application clock and the database clock agreeing; a transfer waiting at its hold under the true clock, its heartbeat armed one tempo out.'
+      hypothesis: 'A jump of the application host''s clock fires the timers the application arms against the database''s time: jumped past the heartbeat tempo the host fires the heartbeat early and re-arms it beyond its tempo, silence reading as liveness, which only an inspection of that state''s timers against its tempo names; jumped backward the host claims nothing; jumped past every tempo it fires the global timeout early and halts the live transfer at its hold, the relay heartbeat minted by the database standing still; the clock fixed, the halted transfer is listed, its hold reclaimed, the withheld event delivered to a saga that no longer listens, money never moved.'
+      injection: 'The commands of the jumped host run as subprocesses under REHEARSAL_CLOCK_OFFSET_SECONDS, a sandbox decorator shifting every instant the application mints, the scenario and the database keeping the true clock: 600 s forward, then the clock fixed and the heartbeat re-armed to now by hand, then 600 s backward, then 7200 s forward, then the clock fixed, the open-holds read model drained and the hold sweep run.'
+      observation: 'Skew read as the jump within thirty seconds each time; one timer fired under the small jump, the heartbeat 840 s ahead of the database, 600 s past its tempo, the saga still running at its wait; the true clock claiming nothing, the inspection naming exactly that timer, the re-arm bringing it within one tempo; zero timers fired under the backward jump; two timers fired under the large jump, the saga halted at await_hold with no live timer; the halted transfer listed, one hold reclaimed, the relay tick within thirty seconds of the database clock, no pending event, no failed message, the balances equal to the baseline after two drains.'
+      recovery: 'Run make clock-jump-recovery in the provisioned Bank checkout with CLOCK_JUMP_DATABASE_HOST, CLOCK_JUMP_BROKER_HOST and MESSENGER_EVENTS_DSN=sync:// declared. The jump-omitted and re-arm-omitted variants must fail. The re-arm is by hand, storm:saga:timers:audit having shipped after the rehearsal; a slow drift, the database host jumping and the lateness of a backward jump are not rehearsed.'
+      cleanup: 'bin/clock-jump-smoke.sh takes a per-schema lock, resets the reserved schema before the run and drops it and the queues after, unsuccessful runs included; the decorator is inert outside the rehearsal, a zero offset.'
+  -
+    id: delivery-regression
+    title: 'Regression introduced by a delivery'
+    prevention:
+      state: available
+      kind: document
+      reference: 'docs/guide/reliability.md, gates and nets, with docs/guide/testing.md: every fix carries a named red test in the proven-defect group, every package holds its mutation budget under Infection, every lot is reviewed independently and dogfooded on Storm Bank before it merges; the deploy-time gates refuse a binary that cannot read the store or assemble its workflows. What none of it prevents: a handler that throws on a valid message, which no gate reads and only the runtime nets contain.'
+    detection:
+      state: available
+      kind: healthcheck
+      reference: 'Storm\Symfony\Health\FailedMessagesHealthCheck::check(), failed_messages, Degraded from the first captured message, with storm_failed_messages{transport} stepping from the deploy and the storm.story.batch_isolated log token per rolled-back batch; storm_projection_status{status=failed} for a projection whose apply throws; SagaHalted announcements and storm:saga:list for the workflows; outbox_publish and storm:outbox:failed for a lane the new binary stalls. A green pipeline says nothing about production: these read what the regressed binary touches from its first message. What they do not read: a regression that computes a wrong state without throwing, and a regression at the ingress refusing valid requests before the bus, the application''s reconciliations and ingress monitors'' to read. Qualified by the Bank rehearsal on the failure transport and its health check; no alert delivery claimed.'
+    resolution:
+      state: available
+      kind: runbook
+      reference: 'docs/operations/delivery-regression.md'
+      preconditions: 'Read the deploy log for the lot and the previous binary, then the signals for what it broke, the failure transport, the failed projections, the halted or parked sagas, the stalled lanes, and the gates against the running binary; record them as the baseline; take the database''s snapshot and export the failure transport before a projection reset or a bulk replay; never purge the failure transport, never fix forward by hand in production, never edit a stored row to fit the regressed binary.'
+      expected_result: 'The previous binary redeployed in the deploy''s order, stop, drain, swap, reopen; the captured messages replayed once under it and their effects observed once; the failed projections retried from their checkpoint or rebuilt from the store; the parked sagas unparked, the dead-lettered commands redriven, the halted ones reclaimed and re-issued; the stalled lanes resumed by the relay''s net; the lot back to review with its regression proven by a named red test.'
+    rehearsal:
+      state: available
+      reference: 'Storm Bank feature:delivery-regression-recovery; merged revision 2561bdc05c5e59cc4eb773a307310294529b5aec, coordination issue 511.'
+      initial_state: 'Exclusive disposable checkout, PostgreSQL, RabbitMQ and Redis; reserved smoke_delivery_regression_ schema, no resident workers or PostgreSQL clients, the world drained under the binary that was in production, the failure transport empty and its health check Ok, the ledger counted.'
+      hypothesis: 'A lot merged behind a green pipeline ships a reaction that throws the unrecoverable kind on every valid deposit: nothing before production reads it; from the first message after the deploy the batched consumer captures each deposit to the failure transport, its batch rolled back so no ledger leg lands, no redelivery, and the failure transport''s health check degrades naming the count; the previous binary back, the captured deposits replay once, every leg landing exactly once, the check Ok again, a second drain moving nothing.'
+      injection: 'The regressed binary is the same code run as subprocesses under REHEARSAL_REGRESSION=deposit, read by a sandbox reaction on the deposit event that throws UnrecoverableMessageHandlingException; the corrected binary is the same subprocess with the variable cleared; the outbox relay and every lane consumer run as subprocesses; five deposits are recorded, relayed and consumed by the regressed binary, then messenger:failed:retry runs under the corrected one.'
+      observation: 'Five deposits recorded by the command side, five captured on the failure transport with no ledger leg written and zero redeliveries, failed_messages Degraded naming five messages; the replay under the corrected binary reported every message handled, zero captured, exactly five ledger legs more than the baseline, failed_messages Ok; a second drain captured nothing and wrote nothing, the check still Ok.'
+      recovery: 'Run make delivery-regression-recovery in the provisioned Bank checkout with DELIVERY_REGRESSION_DATABASE_HOST and DELIVERY_REGRESSION_BROKER_HOST declared. The regression-omitted, revert-omitted and Degraded-inverted variants must fail; a shell exporting the arming variable must not regress the corrected binary. Not rehearsed: a regression that computes a wrong state without throwing, one that throws the recoverable kind and retries, one at the ingress.'
+      cleanup: 'bin/delivery-regression-smoke.sh takes a per-schema lock, resets the reserved schema before the run and drops it and the queues after, unsuccessful runs included; the reaction is inert outside the rehearsal, the variable unset.'

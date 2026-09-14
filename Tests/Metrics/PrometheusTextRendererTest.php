@@ -91,6 +91,21 @@ final class PrometheusTextRendererTest extends TestCase
     }
 
     #[Test]
+    public function help_text_escapes_backslash_and_newline(): void
+    {
+        $text = $this->renderer->render([
+            MetricFamily::gauge('storm_help', 'État "quoted" C:\path literal \n'."\n".'second line', [new MetricSample([], 1)]),
+        ]);
+
+        self::assertSame(
+            '# HELP storm_help État "quoted" C:\\\\path literal \\\\n\\nsecond line'."\n"
+            ."# TYPE storm_help gauge\n"
+            ."storm_help 1\n",
+            $text,
+        );
+    }
+
+    #[Test]
     #[Group('adversarial')]
     public function non_finite_values_render_as_the_spec_tokens_never_php_cast_words(): void
     {

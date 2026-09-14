@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Storm\Telemetry\Tests\Metrics;
 
 use Doctrine\DBAL\Connection;
+use LogicException;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\Test;
+use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Storm\Telemetry\Metrics\MetricFamily;
@@ -114,6 +116,47 @@ final class MetricsExpositionTest extends TestCase
 
         self::assertSame(1, substr_count($text, '# HELP '.MetricsExposition::ERRORS_FAMILY.' '));
         self::assertStringContainsString('error="RuntimeException"', $text, 'the real error gauge survives the spoof');
+    }
+
+    #[Test]
+    #[TestWith(['repeated'])]
+    #[TestWith(['reserved'])]
+    #[TestWith(['mixed'])]
+    public function repeated_family_rejections_emit_one_error_series(string $scenario): void
+    {
+        $names = match ($scenario) {
+            'repeated' => ['storm_a', 'storm_a', 'storm_a'],
+            'reserved' => [MetricsExposition::ERRORS_FAMILY, MetricsExposition::ERRORS_FAMILY],
+            'mixed' => ['storm_a', 'storm_a', MetricsExposition::ERRORS_FAMILY],
+            default => throw new LogicException('Unknown scenario: '.$scenario),
+        };
+        $families = array_map(static fn (string $name): MetricFamily => MetricFamily::gauge($name, 'A metric', [new MetricSample([], 1)]), $names);
+        $families[] = MetricFamily::gauge('storm_healthy', 'A healthy block', [new MetricSample([], 7)]);
+        $exposition = new MetricsExposition([$this->collector($families)], new PrometheusTextRenderer, $this->createStub(Connection::class), 0);
+        $collected = $exposition->collectFamilies();
+        $errors = array_values(array_filter($collected, static fn (MetricFamily $family): bool => $family->name === MetricsExposition::ERRORS_FAMILY));
+
+        self::assertCount(1, $errors);
+        self::assertCount(1, $errors[0]->samples);
+        self::assertSame(1, $errors[0]->samples[0]->value);
+        self::assertSame(MetricsExposition::DUPLICATE_FAMILY, $errors[0]->samples[0]->labels['error']);
+        self::assertStringContainsString("storm_healthy 7\n", new PrometheusTextRenderer()->render($collected));
+    }
+
+    #[Test]
+    public function repeated_failures_keep_one_series_per_distinct_error_identity(): void
+    {
+        $exposition = new MetricsExposition([
+            new ThrowingMetricsCollector(new RuntimeException),
+            new ThrowingMetricsCollector(new RuntimeException),
+            new ThrowingMetricsCollector(new LogicException),
+        ], new PrometheusTextRenderer, $this->createStub(Connection::class), 0);
+        $collected = $exposition->collectFamilies();
+
+        self::assertCount(1, $collected);
+        self::assertCount(2, $collected[0]->samples);
+        self::assertSame(['RuntimeException', 'LogicException'], array_map(static fn (MetricSample $sample): string => $sample->labels['error'], $collected[0]->samples));
+        self::assertSame([1, 1], array_map(static fn (MetricSample $sample): int|float => $sample->value, $collected[0]->samples));
     }
 
     #[Test]

@@ -7,6 +7,7 @@ namespace Storm\Telemetry\Metrics;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception;
 use Storm\Projector\Store\ProjectionCatalog;
+use Storm\Projector\Store\ProjectionStatus;
 
 /**
  * The projector block: per-projection lag against the safe-head floor, status and generation. Lag
@@ -52,17 +53,29 @@ final readonly class ProjectionMetricsCollector implements MetricsCollector
         $lag = [];
         $status = [];
         $generation = [];
+        $heartbeat = [];
+        $expired = [];
 
         foreach ($this->catalog->all() as $row) {
             $lag[] = new MetricSample(['projection' => $row->name], max((int) $head - $row->lastPosition, 0));
             $status[] = new MetricSample(['projection' => $row->name, 'status' => $row->status->value], 1);
             $generation[] = new MetricSample(['projection' => $row->name], $row->generation);
+            // absent, never zero, for a projection that never beat: a zero would read as a fresh beat
+            if ($row->lastHeartbeatAt !== null) {
+                $heartbeat[] = new MetricSample(['projection' => $row->name], max(0, time() - (int) strtotime($row->lastHeartbeatAt)));
+            }
+            // the frozen runner's signature: running, yet its lease ran out under a stopped heartbeat;
+            // the lag cannot show it, the safe-head floor being ratcheted by the runner's own tick
+            $frozen = $row->status === ProjectionStatus::Running && ! $this->catalog->hasLiveLease($row->name);
+            $expired[] = new MetricSample(['projection' => $row->name], $frozen ? 1 : 0);
         }
 
         return [
             MetricFamily::gauge('storm_projection_lag', 'Events below the safe-head floor the projection has not folded yet', $lag),
             MetricFamily::gauge('storm_projection_status', 'Current status per projection, value always 1', $status),
             MetricFamily::gauge('storm_projection_generation', 'Rebuild generation per projection', $generation),
+            MetricFamily::gauge('storm_projection_heartbeat_age_seconds', 'Seconds since the projection runner last renewed its lease', $heartbeat),
+            MetricFamily::gauge('storm_projection_lease_expired', 'One when the projection is running and its lease has expired: the runner stopped without exiting', $expired),
         ];
     }
 }

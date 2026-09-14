@@ -77,14 +77,14 @@ final readonly class MetricsExposition
             try {
                 $collected = $this->collect($collector);
             } catch (Throwable $e) {
-                $errors[] = new MetricSample(['collector' => $short, 'error' => $e::class], 1);
+                $errors[$short][$e::class] = new MetricSample(['collector' => $short, 'error' => $e::class], 1);
 
                 continue;
             }
 
             foreach ($collected as $family) {
                 if (isset($seen[$family->name])) {
-                    $errors[] = new MetricSample(['collector' => $short, 'error' => self::DUPLICATE_FAMILY], 1);
+                    $errors[$short][self::DUPLICATE_FAMILY] = new MetricSample(['collector' => $short, 'error' => self::DUPLICATE_FAMILY], 1);
 
                     continue;
                 }
@@ -96,10 +96,15 @@ final readonly class MetricsExposition
         }
 
         if ($errors !== []) {
+            $samples = [];
+            foreach ($errors as $collectorErrors) {
+                array_push($samples, ...array_values($collectorErrors));
+            }
+
             $families[] = MetricFamily::gauge(
                 self::ERRORS_FAMILY,
                 'Collectors that threw during this scrape, or emitted a family name already taken; the block or family is missing from the output',
-                $errors,
+                $samples,
             );
         }
 
@@ -117,11 +122,21 @@ final readonly class MetricsExposition
             return $collector->families();
         }
 
-        return $this->connection->transactional(function () use ($collector): array {
-            // SET LOCAL scopes the bound to this transaction; commit and rollback both revert it
+        $priorTimeout = $this->connection->isTransactionActive()
+            ? $this->connection->fetchOne('SHOW statement_timeout')
+            : null;
+
+        return $this->connection->transactional(function () use ($collector, $priorTimeout): array {
             $this->connection->executeStatement(sprintf('SET LOCAL statement_timeout = %d', $this->statementTimeoutMs));
 
-            return $collector->families();
+            $families = $collector->families();
+
+            if ($priorTimeout !== null) {
+                // Releasing a savepoint retains `SET LOCAL`; rollback already restores the caller's value.
+                $this->connection->fetchOne("SELECT set_config('statement_timeout', ?, true)", [$priorTimeout]);
+            }
+
+            return $families;
         });
     }
 }

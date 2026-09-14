@@ -117,10 +117,10 @@ final readonly class WorkflowHistoryStore
             /** @lang PostgreSQL */
             "SELECT workflow_type, correlation_id, generation, event_type, payload, event_id, occurred_at, recorded_at
              FROM (
-                 SELECT DISTINCT ON (COALESCE(NULLIF(event_id, ''), id::text))
+                 SELECT DISTINCT ON ((event_id = ''), COALESCE(NULLIF(event_id, ''), id::text))
                         workflow_type, correlation_id, generation, event_type, payload, event_id, occurred_at, recorded_at, id
                  FROM workflow_history WHERE ".$where."
-                 ORDER BY COALESCE(NULLIF(event_id, ''), id::text), id ASC
+                 ORDER BY (event_id = ''), COALESCE(NULLIF(event_id, ''), id::text), id ASC
              ) deduped
              ORDER BY occurred_at ASC, id ASC LIMIT :n",
             $params,

@@ -7,16 +7,20 @@ namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 use Storm\Chronicler\Telemetry\EventStoreObservability;
 use Storm\Projector\Telemetry\ProjectorObservability;
 use Storm\Telemetry\History\LogSagaHistorySink;
-use Storm\Telemetry\Metrics\MetricsExposition;
-use Storm\Telemetry\Metrics\OutboxMetricsCollector;
-use Storm\Telemetry\Metrics\PrometheusTextRenderer;
-use Storm\Telemetry\Metrics\ProjectionMetricsCollector;
-use Storm\Telemetry\Metrics\SagaHistoryMetricsCollector;
-use Storm\Telemetry\Metrics\SagaMetricsCollector;
 use Storm\Telemetry\History\NullSagaHistorySink;
 use Storm\Telemetry\History\SagaHistorySink;
 use Storm\Telemetry\History\TableSagaHistorySink;
 use Storm\Telemetry\History\WorkflowHistoryStore;
+use Storm\Telemetry\Metrics\ClockSkewMetricsCollector;
+use Storm\Telemetry\Metrics\EventStoreCapacityMetricsCollector;
+use Storm\Telemetry\Metrics\MetricsExposition;
+use Storm\Telemetry\Metrics\OutboxMetricsCollector;
+use Storm\Telemetry\Metrics\ProjectionMetricsCollector;
+use Storm\Telemetry\Metrics\PrometheusTextRenderer;
+use Storm\Telemetry\Metrics\SagaHistoryMetricsCollector;
+use Storm\Telemetry\Metrics\SagaMetricsCollector;
+use Storm\Telemetry\Metrics\SchemaConformanceMetricsCollector;
+use Storm\Telemetry\Metrics\SnapshotMetricsCollector;
 use Storm\Telemetry\StormObservability;
 
 /*
@@ -44,6 +48,8 @@ return static function (ContainerConfigurator $container): void {
     $services->load('Storm\\Telemetry\\', dirname(__DIR__).'/')
         ->exclude([
             dirname(__DIR__).'/Schema/',
+            dirname(__DIR__).'/FailureRegistry/',
+            dirname(__DIR__).'/resources/',
             dirname(__DIR__).'/Tests/',
             dirname(__DIR__).'/config/',
             // Wired explicitly below: this dir holds value objects and composites, namely SagaHistoryEntry,
@@ -60,6 +66,12 @@ return static function (ContainerConfigurator $container): void {
     $services->set(SagaHistoryMetricsCollector::class)->autowire();
     $services->set(OutboxMetricsCollector::class)->autowire();
     $services->set(ProjectionMetricsCollector::class)->autowire();
+    $services->set(EventStoreCapacityMetricsCollector::class)->autowire();
+    // the conformance targets are the bundle's to set: the core catalog lives in Ledger, which
+    // Telemetry does not depend on, and the split read-model store is the application's choice
+    $services->set(SchemaConformanceMetricsCollector::class)->autowire();
+    $services->set(SnapshotMetricsCollector::class)->autowire();
+    $services->set(ClockSkewMetricsCollector::class)->autowire();
     $services->set(PrometheusTextRenderer::class)->autowire();
     $services->set(MetricsExposition::class)->autowire();
 
