@@ -9,6 +9,8 @@ use Storm\Chronicler\Telemetry\AppendContext;
 use Storm\Chronicler\Telemetry\EventStoreObservability;
 use Storm\Chronicler\Telemetry\LoadContext;
 use Storm\Chronicler\Telemetry\OccConflictContext;
+use Storm\Chronicler\Telemetry\SafeHeadCrossingContext;
+use Storm\Chronicler\Telemetry\SafeHeadObservability;
 use Storm\Projector\Telemetry\BatchContext;
 use Storm\Projector\Telemetry\ListenerFailureContext;
 use Storm\Projector\Telemetry\ProjectorObservability;
@@ -36,7 +38,7 @@ use Throwable;
  *
  * - `error` for a failed projector run, whose status stays failed until reset.
  */
-final readonly class StormObservability implements EventStoreObservability, ProjectorObservability
+final readonly class StormObservability implements EventStoreObservability, ProjectorObservability, SafeHeadObservability
 {
     private LoggerInterface $logger;
 
@@ -46,6 +48,11 @@ final readonly class StormObservability implements EventStoreObservability, Proj
         // the observed system: the append transaction, the runner loop, the finally. A throwing
         // logger must never reach it
         $this->logger = new BestEffortLogger($logger);
+    }
+
+    public function recordCrossing(SafeHeadCrossingContext $context): void
+    {
+        $this->logger->info('storm.safe_head.crossed', get_object_vars($context) + ['presumption' => 'aborted']);
     }
 
     public function recordAppend(AppendContext $ctx): void

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
 use Storm\Chronicler\Telemetry\EventStoreObservability;
+use Storm\Chronicler\Telemetry\SafeHeadObservability;
 use Storm\Projector\Telemetry\ProjectorObservability;
 use Storm\Telemetry\History\LogSagaHistorySink;
 use Storm\Telemetry\History\NullSagaHistorySink;
@@ -17,6 +18,7 @@ use Storm\Telemetry\Metrics\MetricsExposition;
 use Storm\Telemetry\Metrics\OutboxMetricsCollector;
 use Storm\Telemetry\Metrics\ProjectionMetricsCollector;
 use Storm\Telemetry\Metrics\PrometheusTextRenderer;
+use Storm\Telemetry\Metrics\SafeHeadMetricsCollector;
 use Storm\Telemetry\Metrics\SagaHistoryMetricsCollector;
 use Storm\Telemetry\Metrics\SagaMetricsCollector;
 use Storm\Telemetry\Metrics\SchemaConformanceMetricsCollector;
@@ -66,6 +68,7 @@ return static function (ContainerConfigurator $container): void {
     $services->set(SagaHistoryMetricsCollector::class)->autowire();
     $services->set(OutboxMetricsCollector::class)->autowire();
     $services->set(ProjectionMetricsCollector::class)->autowire();
+    $services->set(SafeHeadMetricsCollector::class)->autowire();
     $services->set(EventStoreCapacityMetricsCollector::class)->autowire();
     // the conformance targets are the bundle's to set: the core catalog lives in Ledger, which
     // Telemetry does not depend on, and the split read-model store is the application's choice
@@ -92,6 +95,7 @@ return static function (ContainerConfigurator $container): void {
 
     // Override the Null aliases from Chronicler / Projector. Last alias wins in services.php
     // import order; StormBundle imports Telemetry after Chronicler / Projector for this to take.
+    $services->alias(SafeHeadObservability::class, StormObservability::class);
     $services->alias(EventStoreObservability::class, StormObservability::class);
     $services->alias(ProjectorObservability::class, StormObservability::class);
 };

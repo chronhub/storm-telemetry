@@ -32,6 +32,7 @@ final class ContextScalarPayloadTest extends TestCase
     ];
 
     private const array CONTEXTS = [
+        \Storm\Chronicler\Telemetry\SafeHeadCrossingContext::class,
         AppendContext::class,
         LoadContext::class,
         OccConflictContext::class,

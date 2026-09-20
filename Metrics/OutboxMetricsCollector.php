@@ -6,6 +6,7 @@ namespace Storm\Telemetry\Metrics;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception;
+use Psr\Log\LoggerInterface;
 
 /**
  * The event-store outbox and inbox block, read by table name from the core schema. The partition
@@ -21,6 +22,7 @@ final readonly class OutboxMetricsCollector implements MetricsCollector
 {
     public function __construct(
         private Connection $connection,
+        private ?LoggerInterface $logger = null,
     ) {}
 
     /**
@@ -34,16 +36,30 @@ final readonly class OutboxMetricsCollector implements MetricsCollector
 
         if ($this->connection->createSchemaManager()->tablesExist(['es_outbox'])) {
             /** @var array<string, int|string|null> $row */
+            // One pass over the pending rows, grouped by partition in a hash aggregate: the partition
+            // count falls out of the group count, the other gauges out of the group sums. A
+            // `count(DISTINCT partition_key)` sorted every pending row on every scrape, spilling to
+            // disk past a few hundred thousand and keeping the pass single-threaded. The failed
+            // rows are few and ride their own partial index.
             $row = (array) $this->connection->fetchAssociative(
-                /** @lang PostgreSQL */
+                /* language=PostgreSQL */
                 "SELECT
-                    count(*) FILTER (WHERE status = 'pending') AS pending,
-                    count(*) FILTER (WHERE status = 'failed') AS failed,
-                    count(DISTINCT partition_key) FILTER (WHERE status = 'pending') AS partitions,
-                    count(*) FILTER (WHERE status = 'pending' AND next_attempt_at > clock_timestamp()) AS cooling,
-                    count(*) FILTER (WHERE status = 'pending' AND attempts > 0) AS backing_off,
-                    COALESCE(EXTRACT(EPOCH FROM (clock_timestamp() - min(occurred_at) FILTER (WHERE status = 'pending')))::bigint, 0) AS oldest_pending_age
-                 FROM es_outbox",
+                    COALESCE(sum(p.n), 0) AS pending,
+                    count(*) AS partitions,
+                    COALESCE(sum(p.cooling), 0) AS cooling,
+                    COALESCE(sum(p.backing_off), 0) AS backing_off,
+                    COALESCE(EXTRACT(EPOCH FROM (clock_timestamp() - min(p.oldest)))::bigint, 0) AS oldest_pending_age,
+                    (SELECT count(*) FROM es_outbox WHERE status = 'failed') AS failed
+                 FROM (
+                    SELECT partition_key,
+                           count(*) AS n,
+                           count(*) FILTER (WHERE next_attempt_at > clock_timestamp()) AS cooling,
+                           count(*) FILTER (WHERE attempts > 0) AS backing_off,
+                           min(occurred_at) AS oldest
+                    FROM es_outbox
+                    WHERE status = 'pending'
+                    GROUP BY partition_key
+                 ) p",
             );
 
             $families[] = MetricFamily::gauge('storm_outbox_events', 'Event outbox rows by status', [
@@ -87,15 +103,34 @@ final readonly class OutboxMetricsCollector implements MetricsCollector
         }
 
         if ($this->connection->createSchemaManager()->tablesExist(['es_inbox'])) {
-            /** @var array{rows: int|string, skipped: int|string, touched: int|string} $inbox */
+            // The retained rows are the statistics collector's live-tuple estimate, never a
+            // `count(*)`: the inbox takes one row per consumed message and a scrape walked all of
+            // them, at a cost that grew with the retention and rivaled the inserts it measured.
+            // The two duplicate gauges stay exact and ride the partial index on `duplicates > 0`,
+            // a handful of rows however many the table retains.
+            // absent, never a zero, when the statistics row is not found under the current schema:
+            // a zero would read as an empty inbox, and the two duplicate gauges below read the table
+            // by the search path, so the two could disagree in silence
+            $rows = $this->connection->fetchOne(
+                /* language=PostgreSQL */
+                "SELECT n_live_tup FROM pg_stat_user_tables WHERE relname = 'es_inbox' AND schemaname = current_schema()",
+            );
+            /** @var array{skipped: int|string, touched: int|string} $inbox */
             $inbox = $this->connection->fetchAssociative(
                 /* language=PostgreSQL */
-                'SELECT count(*) AS rows, COALESCE(sum(duplicates), 0) AS skipped, count(*) FILTER (WHERE duplicates > 0) AS touched
-                 FROM es_inbox',
+                'SELECT COALESCE(sum(duplicates), 0) AS skipped, count(*) AS touched
+                 FROM es_inbox WHERE duplicates > 0',
             );
-            $families[] = MetricFamily::gauge('storm_inbox_rows', 'Processed-message rows currently retained by the idempotency inbox', [
-                new MetricSample([], (int) $inbox['rows']),
-            ]);
+            if ($rows !== false && $rows !== null) {
+                $families[] = MetricFamily::gauge('storm_inbox_rows', 'Processed-message rows currently retained by the idempotency inbox, as the statistics collector estimates them', [
+                    new MetricSample([], (int) $rows),
+                ]);
+            } else {
+                // absent is invisible on a dashboard; the log line is what makes the case audible.
+                // Defensive: `tablesExist` reads the same schemas `current_schema()` heads, so a
+                // table found without its statistics row has not been reproduced
+                $this->logger?->warning('storm.telemetry.inbox_rows_gauge_absent', ['schema' => $this->connection->fetchOne('SELECT current_schema()')]);
+            }
             // the redeliveries the inbox absorbed, over the rows it retains: a skip runs no handler
             // and acks, so without these two the class leaves no trace outside the table
             $families[] = MetricFamily::gauge('storm_inbox_duplicates_skipped', 'Redeliveries the idempotency inbox absorbed, summed over the rows it retains', [

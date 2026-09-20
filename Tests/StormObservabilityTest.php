@@ -12,6 +12,7 @@ use RuntimeException;
 use Storm\Chronicler\Telemetry\AppendContext;
 use Storm\Chronicler\Telemetry\LoadContext;
 use Storm\Chronicler\Telemetry\OccConflictContext;
+use Storm\Chronicler\Telemetry\SafeHeadCrossingContext;
 use Storm\Projector\Telemetry\BatchContext;
 use Storm\Projector\Telemetry\ListenerFailureContext;
 use Storm\Projector\Telemetry\RunContext;
@@ -42,6 +43,19 @@ final class StormObservabilityTest extends TestCase
             [['info', 'storm.event_store.append', ['module' => 'event_store', 'operation' => 'append', ...(array) $ctx]]],
             $this->logger->records,
         );
+    }
+
+    #[Test]
+    public function records_a_gap_crossing_as_a_presumption_with_its_bounded_context(): void
+    {
+        $context = new SafeHeadCrossingContext(10, 20, 5.0, 1, 2, [['from' => 11, 'to' => 12]], false);
+        $this->observability->recordCrossing($context);
+        self::assertSame([['info', 'storm.safe_head.crossed', [
+            'floorBefore' => 10, 'floorAfter' => 20, 'graceSeconds' => 5.0,
+            'gapCount' => 1, 'missingPositions' => 2,
+            'ranges' => [['from' => 11, 'to' => 12]], 'truncated' => false,
+            'presumption' => 'aborted',
+        ]]], $this->logger->records);
     }
 
     #[Test]
