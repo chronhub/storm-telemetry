@@ -72,7 +72,7 @@ final class TableSagaHistorySink implements SagaHistorySink
         // COALESCE keeps a pre-identity wire entry with an empty occurredAt insertable: arrival
         // time is then the best available approximation.
         $this->connection->executeStatement(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'INSERT INTO workflow_history (workflow_type, correlation_id, generation, event_type, payload, event_id, occurred_at)
              VALUES (:workflow_type, :correlation_id, :generation, :event_type, CAST(:payload AS jsonb), :event_id,
                      COALESCE(CAST(NULLIF(:occurred_at, \'\') AS timestamptz), clock_timestamp()))',
@@ -104,7 +104,7 @@ final class TableSagaHistorySink implements SagaHistorySink
         }
 
         return $this->tableExists = (bool) $this->connection->fetchOne(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'SELECT (to_regclass(?) IS NOT NULL)::int',
             [WorkflowHistorySchema::TABLE],
         );

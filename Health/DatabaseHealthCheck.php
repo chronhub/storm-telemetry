@@ -15,11 +15,16 @@ use Throwable;
  * Ships out of the box because every Storm consumer uses DBAL; auto-registered via the
  * `storm.health_check` autoconfigure tag on the `HealthCheck` interface.
  */
-final readonly class DatabaseHealthCheck implements HealthCheck
+final readonly class DatabaseHealthCheck implements SqlHealthCheck
 {
     public function __construct(
         private Connection $connection,
     ) {}
+
+    public function connections(): iterable
+    {
+        return [$this->connection];
+    }
 
     public function name(): string
     {

@@ -137,6 +137,14 @@ final class WorkflowHistoryStoreTest extends TestCase
     }
 
     #[Test]
+    public function the_timeline_binds_the_correlation_it_reads(): void
+    {
+        $this->store([[1], []])->read('corr-1');
+
+        self::assertSame('corr-1', $this->read(1)['params']['corr'] ?? null);
+    }
+
+    #[Test]
     #[Group('adversarial')]
     public function an_empty_workflow_type_narrows_nothing(): void
     {

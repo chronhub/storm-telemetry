@@ -3,7 +3,14 @@
     "description": "Opt-in observability for the Storm framework — fans out the per-module observability ports to structured Monolog logs, a saga history trail, health aggregation and a Prometheus exposition.",
     "type": "library",
     "license": "MIT",
-    "keywords": ["ddd", "cqrs", "event-sourcing", "telemetry", "observability", "monolog"],
+    "keywords": [
+        "ddd",
+        "cqrs",
+        "event-sourcing",
+        "telemetry",
+        "observability",
+        "monolog"
+    ],
     "require": {
         "php": ">=8.5",
         "chronhub/storm-chronicler": "self.version",
@@ -17,11 +24,20 @@
         "symfony/console": "^8.1",
         "symfony/dependency-injection": "^8.1",
         "symfony/event-dispatcher": "^8.1",
-        "symfony/yaml": "^8.1"
+        "symfony/yaml": "^8.1",
+        "symfony/http-client": "^8.1",
+        "symfony/http-client-contracts": "^3.6",
+        "psr/http-client": "^1.0",
+        "psr/http-message": "^2.0"
     },
     "require-dev": {
-        "phpunit/phpunit": "^13.3.0",
-        "phpstan/phpstan": "^2.2.8"
+        "phpunit/phpunit": "^13.4.0",
+        "phpstan/phpstan": "^2.2.16",
+        "open-telemetry/sdk": "^1.15",
+        "open-telemetry/exporter-otlp": "^1.4",
+        "nyholm/psr7": "^1.8",
+        "symfony/process": "^8.1",
+        "ext-curl": "*"
     },
     "autoload": {
         "psr-4": {
@@ -37,5 +53,11 @@
         }
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "suggest": {
+        "open-telemetry/sdk": "^1.15: required only when storm.tracing is enabled.",
+        "open-telemetry/exporter-otlp": "^1.4: official OTLP HTTP exporter for opt-in tracing.",
+        "nyholm/psr7": "^1.8: PSR HTTP messages for opt-in tracing.",
+        "ext-curl": "Required for opt-in trace export; libcurl must support asynchronous DNS."
+    }
 }

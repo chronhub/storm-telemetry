@@ -42,7 +42,7 @@ final readonly class ProjectionMetricsCollector implements MetricsCollector
         }
 
         $head = $this->connection->fetchOne(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'SELECT position FROM event_store_high_water WHERE id = 1',
         );
 

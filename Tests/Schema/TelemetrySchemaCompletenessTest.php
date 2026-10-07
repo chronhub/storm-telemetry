@@ -94,11 +94,13 @@ final class TelemetrySchemaCompletenessTest extends TestCase
     }
 
     /**
-     * Every verified constraint is still declared, and a declared FRAGMENT appears verbatim in the
-     * rendered DDL: the probe compares it against `pg_get_constraintdef`, so a fragment the DDL no
-     * longer contains means either the catalog drifted or the fragment was never deparse-stable to
-     * begin with. The parameter carries the catalog's contract shape; today every telemetry value is
-     * null, and typing against the literal would read the fragment branch as dead code.
+     * Every verified constraint is still declared, and a declared value appears verbatim in the
+     * rendered DDL: the probe compares it against `pg_get_constraintdef`, a complete definition such
+     * as `PRIMARY KEY (id)` by equality and a fragment by containment, so a value the DDL no longer
+     * contains means either the catalog drifted or the value was never deparse-stable to begin with.
+     * The parameter carries the catalog's declared contract shape rather than the constant itself,
+     * so the non-null branch is read against that type and not against whichever values happen to
+     * sit in the list today.
      *
      * @param  array<string, array<string, string|null>>  $constraintsByTable
      * @param  array<string, string>  $ddl

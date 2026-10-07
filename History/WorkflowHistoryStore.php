@@ -114,7 +114,7 @@ final readonly class WorkflowHistoryStore
         // must neither occupy a window slot nor tip the truncation verdict, so the dedup runs
         // BEFORE the LIMIT. An empty event_id keys on the row itself and never collapses.
         $rows = $this->connection->fetchAllAssociative(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             "SELECT workflow_type, correlation_id, generation, event_type, payload, event_id, occurred_at, recorded_at
              FROM (
                  SELECT DISTINCT ON ((event_id = ''), COALESCE(NULLIF(event_id, ''), id::text))
@@ -153,7 +153,7 @@ final readonly class WorkflowHistoryStore
         $this->assertRetentionAge($ageSeconds);
 
         return (int) $this->connection->fetchOne(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'SELECT count(*) FROM workflow_history WHERE '.self::PRUNABLE,
             ['age' => $ageSeconds],
         );
@@ -259,7 +259,7 @@ final readonly class WorkflowHistoryStore
     public function installed(): bool
     {
         return (bool) $this->connection->fetchOne(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'SELECT (to_regclass(?) IS NOT NULL)::int',
             [WorkflowHistorySchema::TABLE],
         );
@@ -305,7 +305,7 @@ final readonly class WorkflowHistoryStore
         // nothing else reads it. Its sibling in `installed()` is NOT equivalent and is not pinned:
         // there the cast meets a `bool` return type, where a raw driver value fails under strict types.
         $any = (bool) $this->connection->fetchOne(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'SELECT EXISTS(SELECT 1 FROM workflow_history LIMIT 1)',
         );
 

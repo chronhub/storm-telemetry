@@ -14,6 +14,7 @@ use Storm\Telemetry\History\TableSagaHistorySink;
 use Storm\Telemetry\History\WorkflowHistoryStore;
 use Storm\Telemetry\Metrics\ClockSkewMetricsCollector;
 use Storm\Telemetry\Metrics\EventStoreCapacityMetricsCollector;
+use Storm\Telemetry\Metrics\EventStoreDefaultRowsMetricsCollector;
 use Storm\Telemetry\Metrics\MetricsExposition;
 use Storm\Telemetry\Metrics\OutboxMetricsCollector;
 use Storm\Telemetry\Metrics\ProjectionMetricsCollector;
@@ -49,6 +50,7 @@ return static function (ContainerConfigurator $container): void {
     // - InstallTelemetryCommand, #[AsCommand('storm:telemetry:install')]
     $services->load('Storm\\Telemetry\\', dirname(__DIR__).'/')
         ->exclude([
+            dirname(__DIR__).'/Tracing/',
             dirname(__DIR__).'/Schema/',
             dirname(__DIR__).'/FailureRegistry/',
             dirname(__DIR__).'/resources/',
@@ -70,6 +72,7 @@ return static function (ContainerConfigurator $container): void {
     $services->set(ProjectionMetricsCollector::class)->autowire();
     $services->set(SafeHeadMetricsCollector::class)->autowire();
     $services->set(EventStoreCapacityMetricsCollector::class)->autowire();
+    $services->set(EventStoreDefaultRowsMetricsCollector::class)->autowire();
     // the conformance targets are the bundle's to set: the core catalog lives in Ledger, which
     // Telemetry does not depend on, and the split read-model store is the application's choice
     $services->set(SchemaConformanceMetricsCollector::class)->autowire();

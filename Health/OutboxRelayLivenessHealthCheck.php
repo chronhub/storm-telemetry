@@ -26,7 +26,7 @@ use Throwable;
  * `Degraded`, not `Down`: events are durably stored and the writers keep writing; a warning surface.
  * `Down` is reserved for a failing query. An absent table is an incomplete install, `Degraded` too.
  */
-final readonly class OutboxRelayLivenessHealthCheck implements HealthCheck
+final readonly class OutboxRelayLivenessHealthCheck implements SqlHealthCheck
 {
     private const string TABLE = 'es_outbox_relay';
 
@@ -39,6 +39,11 @@ final readonly class OutboxRelayLivenessHealthCheck implements HealthCheck
         private Connection $connection,
         private int $degradedAfterSeconds = 300,
     ) {}
+
+    public function connections(): iterable
+    {
+        return [$this->connection];
+    }
 
     public function name(): string
     {

@@ -61,7 +61,7 @@ classes:
     detection:
       state: available
       kind: structured_log
-      reference: 'Storm\Chronicler\Inbox\DbalInboxStore::once(); storm.chronicler.inbox_duplicate at info with the consumer, the message id and the row''s count; the es_inbox row keeps duplicates and last_duplicate_at; metrics storm_inbox_duplicates_skipped and storm_inbox_duplicate_rows beside storm_inbox_rows. The batched path, DbalBatchInboxStore::onceBatch(), skips its duplicates without counting them yet. A duplicate that BYPASSES the inbox leaves no trace here by construction: an effect applied twice is read on the affected aggregate or read model, not on the inbox.'
+      reference: 'Storm\Chronicler\Inbox\DbalInboxStore::once(); storm.chronicler.inbox_duplicate at info with the consumer, the message id and the row''s count; the es_inbox row keeps duplicates and last_duplicate_at; metrics storm_inbox_duplicates_skipped and storm_inbox_duplicate_rows beside storm_inbox_rows. The batched path, DbalBatchInboxStore::onceBatch(), counts every skipped occurrence by encoded key in the same transaction; rolled-back batches leave no committed duplicate observations. A duplicate that BYPASSES the inbox leaves no trace here by construction: an effect applied twice is read on the affected aggregate or read model, not on the inbox.'
     resolution:
       state: available
       kind: runbook
@@ -223,7 +223,7 @@ classes:
       kind: runbook
       reference: 'docs/operations/broker-unavailable.md'
       preconditions: 'Read the broker through events_transport and the attempts through outbox_publish before the backlog checks, which stay Ok inside their threshold; record the pending and failed counts of both outboxes as the baseline; a failed row appearing under the outage is a poison the outage exposed and never the outage itself, since a transport failure keeps its row pending.'
-      expected_result: 'The broker answering, the relays draining their pending tails in order and exiting zero, the consumers back, every withheld effect observed once at its target, no pending older than the recovery and no failed row; a row the outage exposed as poison replayed by its own procedure, storm:outbox:failed --retry for an event and storm:saga:redrive under its four guards for a command.'
+      expected_result: 'The broker answering, the relays draining their pending tails in order and exiting zero, the consumers back, every withheld effect observed once at its target, no pending older than the recovery and no failed row; a row the outage exposed as poison replayed by its own procedure, storm:outbox:failed <id> --retry for an event and storm:saga:redrive under its four guards for a command.'
     rehearsal:
       state: available
       reference: 'Storm Bank feature:broker-unavailable-recovery; merged revision f756aaea61ad7c2f6ac5525597c97a7c5129ec33, coordination issues 504 and 529.'
@@ -243,7 +243,7 @@ classes:
     detection:
       state: available
       kind: healthcheck
-      reference: 'Storm\Telemetry\Health\EventStorePartitionHealthCheck::check(), event_store_partitions: Degraded from the first row event_store_default holds, naming the categories never partitioned and the command that prints their migration; Ok when it is empty. Gauges storm_event_store_partition_bytes{partition}, storm_event_store_default_rows{category} and storm_database_bytes, the last compared to the volume''s capacity by the deployment''s own alert. The wall itself, an append refused for lack of space, is read where the bench showed it lands: the handler fails, the worker retries and the command reaches the failure transport, failed_messages Degraded and the captured error naming the space; a full data volume with the write-ahead log on it kills the server, read by the database check. Integration-qualified on a real store; no alert delivery claimed.'
+      reference: 'Storm\Telemetry\Health\EventStorePartitionHealthCheck::check(), event_store_partitions: Degraded from the first row event_store_default holds, reporting row presence and the command that prints the migration; Ok when it is empty. Gauges storm_event_store_partition_bytes{partition}, storm_event_store_default_rows{category} and storm_database_bytes, the last compared to the volume''s capacity by the deployment''s own alert. The wall itself, an append refused for lack of space, is read where the bench showed it lands: the handler fails, the worker retries and the command reaches the failure transport, failed_messages Degraded and the captured error naming the space; a full data volume with the write-ahead log on it kills the server, read by the database check. Integration-qualified on a real store; no alert delivery claimed.'
     resolution:
       state: available
       kind: runbook
@@ -295,7 +295,7 @@ classes:
     detection:
       state: available
       kind: healthcheck
-      reference: 'Storm\Telemetry\Health\SnapshotOrphanHealthCheck::check(), snapshot_orphans, Degraded from the first snapshot whose stream head is gone naming the count and storm:snapshot:prune-orphans, the structural backstop; gauge storm_snapshots{status=retained|orphaned}. The lie the head probe cannot see, a snapshot whose state contradicts the stream at a version the head still holds, is read by storm:snapshot:verify: a sample of snapshots refolded from the first event to the snapshot version and compared to the stored state key by key, FAILURE naming the stream and the keys that differ, changing nothing. Integration-qualified on a snapshot made to lie and on an orphan; no alert delivery claimed, and the verifier reads on demand, not on a schedule.'
+      reference: 'Storm\Telemetry\Health\SnapshotOrphanHealthCheck::check(), snapshot_orphans, Degraded from the first snapshot whose stream head is gone naming storm:snapshot:prune-orphans, the structural backstop; gauge storm_snapshots{status=retained|orphaned}. The lie the head probe cannot see, a snapshot whose state contradicts the stream at a version the head still holds, is read by storm:snapshot:verify: a sample of snapshots refolded from the first event to the snapshot version and compared to the stored state key by key, FAILURE naming the stream and the keys that differ, changing nothing. Integration-qualified on a snapshot made to lie and on an orphan; no alert delivery claimed, and the verifier reads on demand, not on a schedule.'
     resolution:
       state: available
       kind: runbook

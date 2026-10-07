@@ -54,7 +54,7 @@ final readonly class PrepareToFailCommand
             }
             $alerts = $alertRules === '' ? null : $this->alertNames($alertRules);
             $loaded = FailureRegistry::fromFile($registry, $alerts);
-            $rendered = (new PrepareToFailRenderer)->render($loaded, $issueUrlBase);
+            $rendered = new PrepareToFailRenderer()->render($loaded, $issueUrlBase);
             $output->writeln($alerts === null ? 'Alert reference check: skipped; no --alert-rules supplied.' : 'Alert reference check: passed against '.$alertRules, OutputInterface::OUTPUT_RAW);
             if ($check) {
                 if (! is_file($document) || file_get_contents($document) !== $rendered) {
@@ -82,6 +82,9 @@ final readonly class PrepareToFailCommand
 
             return Command::SUCCESS;
         } catch (RuntimeException|ExceptionInterface $error) {
+            // every YAML exception extends `RuntimeException`, so the second arm catches nothing the first
+            // misses: dropping it is an equivalent mutant the gate's configuration leaves out on the
+            // `catch` line, which also covers the killed mutant that drops the first arm
             $output->writeln($error->getMessage(), OutputInterface::OUTPUT_RAW);
 
             return Command::FAILURE;

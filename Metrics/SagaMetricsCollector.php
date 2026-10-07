@@ -50,7 +50,7 @@ final readonly class SagaMetricsCollector implements MetricsCollector
     {
         /** @var array<string, int|string> $row */
         $row = (array) $this->connection->fetchAssociative(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'SELECT
                 count(*) FILTER (WHERE parked_at IS NOT NULL) AS parked,
                 count(*) FILTER (WHERE claimed_at IS NOT NULL AND parked_at IS NULL) AS claimed,
@@ -59,12 +59,10 @@ final readonly class SagaMetricsCollector implements MetricsCollector
              FROM workflow_timers',
         );
 
-        $samples = [];
-        foreach (['due', 'scheduled', 'claimed', 'parked'] as $disposition) {
-            $samples[] = new MetricSample(['disposition' => $disposition], (int) ($row[$disposition] ?? 0));
-        }
-
-        return $samples;
+        return array_map(
+            static fn (string $disposition): MetricSample => new MetricSample(['disposition' => $disposition], (int) ($row[$disposition] ?? 0)),
+            ['due', 'scheduled', 'claimed', 'parked'],
+        );
     }
 
     /**
@@ -80,11 +78,12 @@ final readonly class SagaMetricsCollector implements MetricsCollector
         // the scrape runs on a timer, so the cost repeats forever.
         /** @var array<string, int|string|null> $row */
         $row = (array) $this->connection->fetchAssociative(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             "SELECT
                 (SELECT count(*) FROM workflow_outbox WHERE status = 'pending') AS pending,
                 (SELECT count(*) FROM workflow_outbox WHERE status = 'failed') AS failed,
-                (SELECT count(*) FROM workflow_outbox WHERE status = 'pending' AND attempts > 0) AS backing_off,
+                (SELECT count(*) FROM workflow_outbox WHERE status = 'pending' AND attempts > 0
+                   AND (claimed_until IS NULL OR claimed_until <= clock_timestamp())) AS backing_off,
                 COALESCE((SELECT EXTRACT(EPOCH FROM (clock_timestamp() - min(created_at)))::bigint
                           FROM workflow_outbox WHERE status = 'pending'), 0) AS oldest_pending_age",
         );
@@ -94,7 +93,7 @@ final readonly class SagaMetricsCollector implements MetricsCollector
                 new MetricSample(['status' => 'pending'], (int) ($row['pending'] ?? 0)),
                 new MetricSample(['status' => 'failed'], (int) ($row['failed'] ?? 0)),
             ]),
-            MetricFamily::gauge('storm_saga_outbox_backing_off', 'Pending saga commands that failed at least one dispatch and are still retried', [
+            MetricFamily::gauge('storm_saga_outbox_backing_off', 'Pending saga commands that spent at least one claim and wait for the next, a claim in flight excluded: a dispatch backing off after a failure, or a claim that lapsed with no outcome recorded', [
                 new MetricSample([], (int) ($row['backing_off'] ?? 0)),
             ]),
             MetricFamily::gauge('storm_saga_outbox_oldest_pending_age_seconds', 'Age of the oldest still-pending saga command, 0 when none', [
@@ -125,7 +124,7 @@ final readonly class SagaMetricsCollector implements MetricsCollector
         $retries = [];
 
         foreach ($this->connection->fetchAllAssociative(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'SELECT workflow_type, status, state_key,
                     count(*) AS n,
                     COALESCE(sum(retry_total), 0) AS retries

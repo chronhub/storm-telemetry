@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Storm\Telemetry\Health;
 
+use Doctrine\DBAL\Connection;
 use Storm\Projector\Store\ProjectionCatalog;
 use Storm\Projector\Store\ProjectionStatus;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -22,17 +23,25 @@ use Throwable;
  * core schema `storm:install` always creates. `Down` is reserved for a failing read. A projection
  * paused, idle or failed holds no lease and is not read here: `storm:projection:status` is its verb.
  */
-final readonly class ProjectionRunnerLivenessHealthCheck implements HealthCheck
+final readonly class ProjectionRunnerLivenessHealthCheck implements SqlHealthCheck
 {
     /**
      * Lazy on purpose: the catalog stands on the projector's homes, the event store and its cipher
      * key behind them, and a kernel that only describes the health checks by name, the ApiOps
      * describe surface, must never boot that graph; it materializes at the first `check()`.
+     * A manually composed SQL catalog must supply its connection to participate in SQL bounds.
      */
     public function __construct(
         #[Autowire(lazy: true)]
         private ProjectionCatalog $catalog,
+        #[Autowire(service: 'storm.read_model_store_connection')]
+        private ?Connection $connection = null,
     ) {}
+
+    public function connections(): iterable
+    {
+        return $this->connection === null ? [] : [$this->connection];
+    }
 
     public function name(): string
     {

@@ -174,11 +174,10 @@ final class TelemetryHistoryCommand extends Command
             return '—';
         }
 
-        $pairs = [];
-        foreach ($record->payload as $key => $value) {
-            $pairs[] = $key.'='.(is_scalar($value) || $value === null ? var_export($value, true) : '{…}');
-        }
-
-        return implode(' ', $pairs);
+        return implode(' ', array_map(
+            static fn (int|string $key, mixed $value): string => $key.'='.(is_scalar($value) || $value === null ? var_export($value, true) : '{…}'),
+            array_keys($record->payload),
+            $record->payload,
+        ));
     }
 }

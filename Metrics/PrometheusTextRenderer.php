@@ -51,11 +51,15 @@ final readonly class PrometheusTextRenderer
             return '';
         }
 
-        $pairs = [];
-        foreach ($labels as $name => $value) {
-            $escaped = str_replace(['\\', '"', "\n"], ['\\\\', '\\"', '\\n'], $value);
-            $pairs[] = sprintf('%s="%s"', $name, $escaped);
-        }
+        $pairs = array_map(
+            static fn (string|int $name, string $value): string => sprintf(
+                '%s="%s"',
+                $name,
+                str_replace(['\\', '"', "\n"], ['\\\\', '\\"', '\\n'], $value),
+            ),
+            array_keys($labels),
+            $labels,
+        );
 
         return '{'.implode(',', $pairs).'}';
     }

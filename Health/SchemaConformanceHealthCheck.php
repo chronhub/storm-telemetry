@@ -22,15 +22,27 @@ use Throwable;
  * reserved for a failing catalog query. It interrogates the catalogs of every table it is given,
  * a cost per call that a health endpoint, not a scrape loop, is meant to pay.
  */
-final readonly class SchemaConformanceHealthCheck implements HealthCheck
+final readonly class SchemaConformanceHealthCheck implements SqlHealthCheck
 {
+    /** @var array<SchemaConformanceTarget> */
+    private array $targets;
+
     /**
      * @param  iterable<SchemaConformanceTarget>  $targets
      */
     public function __construct(
         private Connection $connection,
-        private iterable $targets = [],
-    ) {}
+        iterable $targets = [],
+    ) {
+        $this->targets = [...$targets];
+    }
+
+    public function connections(): iterable
+    {
+        foreach ($this->targets as $target) {
+            yield $target->connection ?? $this->connection;
+        }
+    }
 
     public function name(): string
     {

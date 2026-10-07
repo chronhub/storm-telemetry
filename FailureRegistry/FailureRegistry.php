@@ -28,12 +28,11 @@ final readonly class FailureRegistry
         if (! is_array($data)) {
             throw new RuntimeException('registry: expected a mapping.');
         }
-        $errors = (new FailureRegistryLint)->lint($data, $alertNames);
+        $errors = new FailureRegistryLint()->lint($data, $alertNames);
         if ($errors !== []) {
             throw new RuntimeException(implode("\n", $errors));
         }
-        $classes = [];
-        foreach ($data['classes'] as $entry) {
+        $classes = array_map(static function (array $entry): FailureClass {
             $stages = [];
             foreach (FailureRegistryLint::STAGES as $name) {
                 $details = $entry[$name];
@@ -41,8 +40,9 @@ final readonly class FailureRegistry
                 unset($details['state']);
                 $stages[$name] = new Stage($state, $details);
             }
-            $classes[] = new FailureClass($entry['id'], $entry['title'], $stages);
-        }
+
+            return new FailureClass($entry['id'], $entry['title'], $stages);
+        }, $data['classes']) |> array_values(...);
 
         return new self($classes);
     }

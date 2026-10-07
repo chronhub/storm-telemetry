@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Storm\Telemetry\Tests\FailureRegistry;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Storm\Telemetry\FailureRegistry\FailureRegistryLint;
@@ -103,6 +104,125 @@ final class FailureRegistryLintTest extends TestCase
         self::assertCount(2, (new FailureRegistryLint)->lint($data));
         $data['classes'][0]['detection'] += ['reason' => 'No broker in this deployment', 'decision' => 'Decision #504'];
         self::assertSame([], (new FailureRegistryLint)->lint($data));
+    }
+
+    /**
+     * @param  mixed[]  $data
+     */
+    #[Test]
+    #[DataProvider('classesThatAreNoNonemptyList')]
+    public function a_registry_whose_classes_are_no_nonempty_list_is_refused_as_a_whole(array $data): void
+    {
+        self::assertSame(['registry.classes: expected a nonempty list.'], (new FailureRegistryLint)->lint($data));
+    }
+
+    /**
+     * @return iterable<string, array{mixed[]}>
+     */
+    public static function classesThatAreNoNonemptyList(): iterable
+    {
+        yield 'a string' => [['classes' => 'broker']];
+        yield 'a mapping' => [['classes' => ['broker' => []]]];
+        yield 'an empty list' => [['classes' => []]];
+    }
+
+    #[Test]
+    #[DataProvider('identifiersThatAreNotLowercase')]
+    public function an_identifier_must_be_lowercase_from_its_first_character_to_its_last(mixed $id, string $error): void
+    {
+        $data = $this->valid();
+        $data['classes'][0]['id'] = $id;
+
+        self::assertContains($error, (new FailureRegistryLint)->lint($data));
+    }
+
+    /**
+     * @return iterable<string, array{mixed, string}>
+     */
+    public static function identifiersThatAreNotLowercase(): iterable
+    {
+        yield 'a leading digit' => ['1broker', '1broker.id: expected a lowercase identifier.'];
+        yield 'a trailing symbol' => ['broker!', 'broker!.id: expected a lowercase identifier.'];
+        yield 'a trailing newline' => ["broker\n", "broker\n.id: expected a lowercase identifier."];
+        yield 'a number' => [42, 'classes.0.id: expected a lowercase identifier.'];
+    }
+
+    #[Test]
+    public function a_stage_with_an_unreadable_state_does_not_stop_the_next_stages_being_checked(): void
+    {
+        $data = $this->valid();
+        $data['classes'][0]['prevention'] = [];
+        unset($data['classes'][0]['detection']['issue']);
+
+        $errors = (new FailureRegistryLint)->lint($data);
+
+        self::assertContains('broker.prevention: expected a stage with state available, hole or not_applicable.', $errors);
+        self::assertContains('broker.detection.issue: expected a positive issue number.', $errors);
+    }
+
+    #[Test]
+    #[DataProvider('issuesThatAreNoPositiveInteger')]
+    public function an_issue_must_be_a_positive_integer(mixed $issue): void
+    {
+        $data = $this->valid();
+        $data['classes'][0]['detection']['issue'] = $issue;
+
+        self::assertContains('broker.detection.issue: expected a positive issue number.', (new FailureRegistryLint)->lint($data));
+    }
+
+    /**
+     * @return iterable<string, array{mixed}>
+     */
+    public static function issuesThatAreNoPositiveInteger(): iterable
+    {
+        yield 'zero' => [0];
+        yield 'a negative number' => [-1];
+        yield 'a numeric string' => ['504'];
+    }
+
+    #[Test]
+    public function a_hole_may_carry_a_reason_and_a_decision(): void
+    {
+        $data = $this->valid();
+        $data['classes'][0]['detection'] += ['reason' => 'Awaiting the broker probe', 'decision' => 'Decision #504'];
+
+        self::assertSame([], (new FailureRegistryLint)->lint($data));
+    }
+
+    #[Test]
+    public function an_unknown_stage_field_is_reported(): void
+    {
+        $data = $this->valid();
+        $data['classes'][0]['detection']['owner'] = 'ops';
+
+        self::assertContains('broker.detection.owner: unknown stage field.', (new FailureRegistryLint)->lint($data));
+    }
+
+    #[Test]
+    public function a_stage_field_must_be_a_string_or_an_integer(): void
+    {
+        $data = $this->valid();
+        $data['classes'][0]['detection']['reason'] = ['Awaiting the broker probe'];
+
+        self::assertContains('broker.detection.reason: expected a scalar string or integer.', (new FailureRegistryLint)->lint($data));
+    }
+
+    #[Test]
+    public function prevention_refers_only_to_code_or_a_document(): void
+    {
+        $data = $this->valid();
+        $data['classes'][0]['prevention'] = ['state' => 'available', 'kind' => 'alert', 'reference' => 'BrokerDown'];
+
+        self::assertContains('broker.prevention.kind: unsupported reference kind.', (new FailureRegistryLint)->lint($data));
+    }
+
+    #[Test]
+    public function a_title_made_of_blanks_is_no_text(): void
+    {
+        $data = $this->valid();
+        $data['classes'][0]['title'] = '   ';
+
+        self::assertContains('broker.title: expected nonempty text.', (new FailureRegistryLint)->lint($data));
     }
 
     /**

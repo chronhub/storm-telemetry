@@ -22,7 +22,7 @@ use Throwable;
  * deployment whose tempos are seconds sets it lower. Which of the two hosts moved, only true
  * time says: the check reads them against each other and blames neither.
  */
-final readonly class ClockSkewHealthCheck implements HealthCheck
+final readonly class ClockSkewHealthCheck implements SqlHealthCheck
 {
     /**
      * @param  Clock<PointInTime>  $clock
@@ -36,6 +36,11 @@ final readonly class ClockSkewHealthCheck implements HealthCheck
         private Clock $clock,
         private int $degradedAfterSeconds = 5,
     ) {}
+
+    public function connections(): iterable
+    {
+        return [$this->connection];
+    }
 
     public function name(): string
     {

@@ -28,14 +28,17 @@ final readonly class MetricSample
         public array $labels,
         public int|float $value,
     ) {
-        foreach (array_keys($labels) as $name) {
-            if (preg_match(self::LABEL_GRAMMAR, (string) $name) !== 1 || str_starts_with((string) $name, '__')) {
-                throw new InvalidArgumentException(sprintf(
-                    'A label name must match the Prometheus grammar %s and not start with the reserved "__", got "%s".',
-                    self::LABEL_GRAMMAR,
-                    $name,
-                ));
-            }
+        $invalid = array_find(
+            array_keys($labels),
+            static fn (string|int $name): bool => preg_match(self::LABEL_GRAMMAR, (string) $name) !== 1 || str_starts_with((string) $name, '__'),
+        );
+
+        if ($invalid !== null) {
+            throw new InvalidArgumentException(sprintf(
+                'A label name must match the Prometheus grammar %s and not start with the reserved "__", got "%s".',
+                self::LABEL_GRAMMAR,
+                $invalid,
+            ));
         }
     }
 }

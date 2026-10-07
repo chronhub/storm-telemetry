@@ -41,6 +41,8 @@ final readonly class OutboxMetricsCollector implements MetricsCollector
             // `count(DISTINCT partition_key)` sorted every pending row on every scrape, spilling to
             // disk past a few hundred thousand and keeping the pass single-threaded. The failed
             // rows are few and ride their own partial index.
+            // @infection-ignore-all; equivalent: an aggregate over a subquery always answers one row, and
+            // on a false the `?? 0` below reads every gauge as zero with or without the cast
             $row = (array) $this->connection->fetchAssociative(
                 /* language=PostgreSQL */
                 "SELECT

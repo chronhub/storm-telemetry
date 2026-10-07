@@ -27,7 +27,7 @@ use Throwable;
  * Reads `workflow_outbox` by name so Telemetry observes Saga's table without a type dependency, the
  * way the event outbox check knows `es_outbox`. Auto-registered via the `storm.health_check` tag.
  */
-final readonly class SagaOutboxLivenessHealthCheck implements HealthCheck
+final readonly class SagaOutboxLivenessHealthCheck implements SqlHealthCheck
 {
     private const string TABLE = 'workflow_outbox';
 
@@ -40,6 +40,11 @@ final readonly class SagaOutboxLivenessHealthCheck implements HealthCheck
         private Connection $connection,
         private int $degradedAfterSeconds = 300,
     ) {}
+
+    public function connections(): iterable
+    {
+        return [$this->connection];
+    }
 
     public function name(): string
     {

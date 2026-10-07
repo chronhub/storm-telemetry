@@ -36,17 +36,18 @@ final readonly class SagaHistoryMetricsCollector implements MetricsCollector
             return [];
         }
 
-        $samples = [];
-
-        foreach ($this->connection->fetchAllAssociative(
-            /** @lang PostgreSQL */
+        $rows = $this->connection->fetchAllAssociative(
+            /* language=PostgreSQL */
             'SELECT workflow_type, event_type, count(*) AS n FROM workflow_history GROUP BY 1, 2',
-        ) as $row) {
-            $samples[] = new MetricSample(
+        );
+
+        $samples = array_map(
+            static fn (array $row): MetricSample => new MetricSample(
                 ['workflow_type' => (string) $row['workflow_type'], 'event_type' => (string) $row['event_type']],
                 (int) $row['n'],
-            );
-        }
+            ),
+            $rows,
+        );
 
         return [
             MetricFamily::counter(

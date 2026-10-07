@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Storm\Telemetry\Metrics;
 
 use Doctrine\DBAL\Connection;
+use Storm\Support\Text\Str;
 use Symfony\Component\DependencyInjection\Attribute\AutowireIterator;
 use Throwable;
 
@@ -72,7 +73,7 @@ final readonly class MetricsExposition
         $seen = [self::ERRORS_FAMILY => true];
 
         foreach ($this->collectors as $collector) {
-            $short = substr(strrchr($collector::class, '\\') ?: '\\'.$collector::class, 1);
+            $short = Str::shortClass($collector::class);
 
             try {
                 $collected = $this->collect($collector);

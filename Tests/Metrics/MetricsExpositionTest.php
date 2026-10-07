@@ -178,6 +178,42 @@ final class MetricsExpositionTest extends TestCase
     }
 
     #[Test]
+    public function a_scrape_inside_a_caller_transaction_restores_the_caller_s_statement_timeout(): void
+    {
+        // releasing the savepoint keeps `SET LOCAL`, so the caller's own bound is put back explicitly
+        $reads = [];
+        $connection = $this->boundConnection(true, $reads);
+
+        new MetricsExposition([$this->collector([MetricFamily::gauge('storm_a', 'a', [new MetricSample([], 1)])])], new PrometheusTextRenderer, $connection, statementTimeoutMs: 250)->render();
+
+        self::assertSame([['SHOW statement_timeout', []], ["SELECT set_config('statement_timeout', ?, true)", ['30s']]], $reads);
+    }
+
+    #[Test]
+    public function a_scrape_outside_any_transaction_reads_and_restores_no_timeout(): void
+    {
+        $reads = [];
+        $connection = $this->boundConnection(false, $reads);
+
+        new MetricsExposition([$this->collector([MetricFamily::gauge('storm_a', 'a', [new MetricSample([], 1)])])], new PrometheusTextRenderer, $connection, statementTimeoutMs: 250)->render();
+
+        self::assertSame([], $reads);
+    }
+
+    #[Test]
+    public function a_bounded_collector_exposes_every_family_it_returns(): void
+    {
+        $reads = [];
+        $text = new MetricsExposition([$this->collector([
+            MetricFamily::gauge('storm_a', 'a', [new MetricSample([], 1)]),
+            MetricFamily::gauge('storm_b', 'b', [new MetricSample([], 2)]),
+        ])], new PrometheusTextRenderer, $this->boundConnection(false, $reads), statementTimeoutMs: 250)->render();
+
+        self::assertStringContainsString("storm_a 1\n", $text);
+        self::assertStringContainsString("storm_b 2\n", $text);
+    }
+
+    #[Test]
     public function the_default_bound_is_five_seconds_and_a_bound_of_one_still_binds(): void
     {
         // the default is a wired fact: autowiring fills nothing, so the shipped value IS the scrape
@@ -233,6 +269,27 @@ final class MetricsExpositionTest extends TestCase
                 return $this->families;
             }
         };
+    }
+
+    /**
+     * A connection that runs each scrape transaction inline and records every scalar read with its
+     * parameters, the caller's own bound reading as thirty seconds.
+     *
+     * @param  list<array{string, mixed[]}>  $reads
+     */
+    private function boundConnection(bool $inTransaction, array &$reads): Connection
+    {
+        $connection = $this->createStub(Connection::class);
+        $connection->method('isTransactionActive')->willReturn($inTransaction);
+        $connection->method('transactional')->willReturnCallback(static fn (callable $fn): mixed => $fn());
+        $connection->method('executeStatement')->willReturn(0);
+        $connection->method('fetchOne')->willReturnCallback(static function (string $sql, array $params = []) use (&$reads): string {
+            $reads[] = [$sql, $params];
+
+            return '30s';
+        });
+
+        return $connection;
     }
 
     /**

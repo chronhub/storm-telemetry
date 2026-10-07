@@ -46,9 +46,11 @@ final class TelemetrySchemaCatalog
     ];
 
     /**
-     * Named constraints per table; a non-null value is a fragment the live `pg_get_constraintdef`
-     * must contain. The single primary key pins its column, `PRIMARY KEY (…)` deparsing verbatim,
-     * so a homonym keyed differently is refused at install rather than discovered at read time.
+     * Named constraints per table; a non-null value opening on its definition keyword is the
+     * complete definition the live `pg_get_constraintdef` must equal, and any other is a fragment it
+     * must contain, the rule `ConstraintShape` applies. The single primary key pins its column,
+     * `PRIMARY KEY (…)` deparsing verbatim, so a homonym keyed differently is refused at install
+     * rather than discovered at read time.
      *
      * @var array<string, array<string, string|null>>
      */

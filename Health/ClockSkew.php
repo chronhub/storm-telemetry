@@ -26,10 +26,16 @@ final readonly class ClockSkew
      */
     public static function read(Connection $connection, Clock $clock): int
     {
+        // @infection-ignore-all; equivalent: `format('U.u')` is a numeric string, and the sum below reads
+        // it as the very float the cast produces
         $before = (float) $clock->now()->format('U.u');
         $database = PointInTime::fromStorage((string) $connection->fetchOne("SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US+00')"));
+        // @infection-ignore-all; equivalent: `format('U.u')` is a numeric string, and the sum below reads
+        // it as the very float the cast produces
         $after = (float) $clock->now()->format('U.u');
 
+        // the same holds for the database instant's cast here, an equivalent mutant the gate's
+        // configuration leaves out on this line, where the arithmetic and the rounding are killed
         return (int) round(($before + $after) / 2 - (float) $database->format('U.u'));
     }
 }

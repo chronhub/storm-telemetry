@@ -29,7 +29,7 @@ use Throwable;
  *
  * Auto-registered via the `storm.health_check` autoconfigure tag on the `HealthCheck` interface.
  */
-final readonly class OutboxLivenessHealthCheck implements HealthCheck
+final readonly class OutboxLivenessHealthCheck implements SqlHealthCheck
 {
     private const string TABLE = 'es_outbox';
 
@@ -42,6 +42,11 @@ final readonly class OutboxLivenessHealthCheck implements HealthCheck
         private Connection $connection,
         private int $degradedAfterSeconds = 300,
     ) {}
+
+    public function connections(): iterable
+    {
+        return [$this->connection];
+    }
 
     public function name(): string
     {
@@ -67,7 +72,7 @@ final readonly class OutboxLivenessHealthCheck implements HealthCheck
 
             /** @var array{oldest_pending: int|string|null, failed_count: int|string, oldest_failed: int|string|null}|false $row */
             $row = $this->connection->fetchAssociative(
-                /** @lang PostgreSQL */
+                /* language=PostgreSQL */
                 "SELECT
                     (SELECT EXTRACT(EPOCH FROM (clock_timestamp() - min(occurred_at)))::int FROM es_outbox WHERE status = 'pending') AS oldest_pending,
                     (SELECT count(*) FROM es_outbox WHERE status = 'failed') AS failed_count,

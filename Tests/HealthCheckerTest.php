@@ -4,17 +4,131 @@ declare(strict_types=1);
 
 namespace Storm\Telemetry\Tests;
 
+use Closure;
+use Doctrine\DBAL\Connection;
+use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Storm\Telemetry\Health\HealthCheck;
 use Storm\Telemetry\Health\HealthCheckResult;
 use Storm\Telemetry\Health\HealthStatus;
+use Storm\Telemetry\Health\SqlHealthCheck;
 use Storm\Telemetry\HealthChecker;
 use Throwable;
 
 final class HealthCheckerTest extends TestCase
 {
+    #[Test]
+    public function an_exhausted_budget_reports_unobserved_checks_down(): void
+    {
+        $slow = new class() implements HealthCheck
+        {
+            public function name(): string
+            {
+                return 'slow';
+            }
+
+            public function check(): HealthCheckResult
+            {
+                usleep(30_000);
+
+                return HealthCheckResult::ok();
+            }
+        };
+        $unobserved = new class() implements HealthCheck
+        {
+            public bool $called = false;
+
+            public function name(): string
+            {
+                return 'unobserved';
+            }
+
+            public function check(): HealthCheckResult
+            {
+                $this->called = true;
+
+                return HealthCheckResult::ok();
+            }
+        };
+
+        $result = new HealthChecker([$slow, $unobserved], collectionBudgetMs: 20)->runAll();
+
+        self::assertFalse($unobserved->called);
+        self::assertSame(HealthStatus::Down, $result['status']);
+        self::assertSame('health collection budget exhausted', $result['checks']['unobserved']->message);
+    }
+
+    #[Test]
+    public function a_sql_probe_runs_inside_a_rolled_back_scope_bounded_at_the_default_statement_timeout(): void
+    {
+        // the connection is declared twice and bounded once, and the order is the scope itself: the
+        // bound is set inside the transaction, the probe runs under it, and the rollback comes last.
+        // A fresh collection budget leaves far more than the default 250 ms, and a caller setting of
+        // zero imposes nothing, so the default itself is the bound the scope sets
+        $calls = [];
+        $connection = $this->createMock(Connection::class);
+        $connection->expects($this->once())->method('beginTransaction')
+            ->willReturnCallback(static function () use (&$calls): void {
+                $calls[] = 'begin';
+            });
+        $connection->expects($this->once())->method('fetchOne')
+            ->willReturnCallback(static function () use (&$calls): string {
+                $calls[] = 'read the caller setting';
+
+                return '0';
+            });
+        $connection->expects($this->once())->method('executeStatement')->with('SET LOCAL statement_timeout = 250')
+            ->willReturnCallback(static function () use (&$calls): int {
+                $calls[] = 'bound the statements';
+
+                return 0;
+            });
+        $connection->expects($this->once())->method('rollBack')
+            ->willReturnCallback(static function () use (&$calls): void {
+                $calls[] = 'roll back';
+            });
+        $probe = $this->sqlProbe('db', [$connection, $connection], static function () use (&$calls): void {
+            $calls[] = 'probe';
+        });
+
+        $result = new HealthChecker([$probe])->runAll();
+
+        self::assertSame(HealthStatus::Ok, $result['status']);
+        self::assertSame(['begin', 'read the caller setting', 'bound the statements', 'probe', 'roll back'], $calls);
+    }
+
+    #[Test]
+    public function the_smallest_budgets_are_accepted(): void
+    {
+        // one millisecond is the floor each guard exists to allow; read as `<= 1`, either would
+        // refuse it
+        $result = new HealthChecker([$this->stub('db', HealthCheckResult::ok())], statementTimeoutMs: 1, collectionBudgetMs: 1)->runAll();
+
+        self::assertArrayHasKey('db', $result['checks']);
+    }
+
+    #[Test]
+    #[DataProvider('oneEmptyBudget')]
+    public function a_single_empty_budget_is_refused(int $statementTimeoutMs, int $collectionBudgetMs): void
+    {
+        // each budget is refused on its own: the guard reads "either is empty", never "both are"
+        $this->expectException(InvalidArgumentException::class);
+
+        new HealthChecker([], $statementTimeoutMs, $collectionBudgetMs);
+    }
+
+    /**
+     * @return iterable<string, array{int, int}>
+     */
+    public static function oneEmptyBudget(): iterable
+    {
+        yield 'statement timeout' => [0, 1000];
+        yield 'collection budget' => [250, 0];
+    }
+
     #[Test]
     public function returns_ok_with_no_registered_checks(): void
     {
@@ -198,6 +312,41 @@ final class HealthCheckerTest extends TestCase
             public function check(): HealthCheckResult
             {
                 return $this->r;
+            }
+        };
+    }
+
+    /**
+     * @param  list<Connection>  $connections
+     * @param  (Closure(): void)|null  $onCheck
+     */
+    private function sqlProbe(string $name, array $connections, ?Closure $onCheck = null): SqlHealthCheck
+    {
+        return new readonly class($name, $connections, $onCheck) implements SqlHealthCheck
+        {
+            /**
+             * @param  list<Connection>  $c
+             * @param  (Closure(): void)|null  $onCheck
+             */
+            public function __construct(private string $n, private array $c, private ?Closure $onCheck) {}
+
+            public function connections(): iterable
+            {
+                return $this->c;
+            }
+
+            public function name(): string
+            {
+                return $this->n;
+            }
+
+            public function check(): HealthCheckResult
+            {
+                if ($this->onCheck !== null) {
+                    ($this->onCheck)();
+                }
+
+                return HealthCheckResult::ok();
             }
         };
     }
