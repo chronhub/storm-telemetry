@@ -24,12 +24,14 @@ use Storm\Saga\Event\SagaCompensated;
 use Storm\Saga\Event\SagaCompensationSkipped;
 use Storm\Saga\Event\SagaCompleted;
 use Storm\Saga\Event\SagaFamilyCrossingReplayed;
+use Storm\Saga\Event\SagaFamilyCrossingUnresolved;
 use Storm\Saga\Event\SagaFamilyMemberConcluded;
 use Storm\Saga\Event\SagaGloballyTimedOut;
 use Storm\Saga\Event\SagaHalted;
 use Storm\Saga\Event\SagaJoinArmArrived;
 use Storm\Saga\Event\SagaJoinCompleted;
 use Storm\Saga\Event\SagaJoinFailed;
+use Storm\Saga\Event\SagaOutcomeDeferred;
 use Storm\Saga\Event\SagaOutcomeDiscarded;
 use Storm\Saga\Event\SagaPaused;
 use Storm\Saga\Event\SagaRaceSettled;
@@ -46,9 +48,10 @@ use Stringable;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
 
 /**
- * The subscriber is a thin adapter: it normalizes a Saga* event into a SagaHistoryEntry and forwards it to
- * the sink. The two behaviors that matter are the forward, and the cardinal rule that a sink failure must
- * not break the observed saga; the engine dispatches these after commit, with no isolation of its own.
+ * The subscriber is a thin adapter that turns a `Saga*` event into a `SagaHistoryEntry` for the sink.
+ *
+ * Two behaviors matter: the forward, and the rule that a sink failure must not break the observed
+ * saga, since the engine dispatches these events after commit with no isolation of its own.
  */
 final class SagaHistorySubscriberTest extends TestCase
 {
@@ -98,6 +101,29 @@ final class SagaHistorySubscriberTest extends TestCase
         self::assertSame('TransferWorkflow', $sink->entry->workflowType);
         self::assertSame('corr-1', $sink->entry->correlationId);
         self::assertSame($expectedEventType, $sink->entry->eventType);
+    }
+
+    #[Test]
+    public function forwards_an_unresolved_family_crossing_with_the_type_its_park_holds(): void
+    {
+        $sink = new class() implements SagaHistorySink
+        {
+            public ?SagaHistoryEntry $entry = null;
+
+            public function record(SagaHistoryEntry $entry): void
+            {
+                $this->entry = $entry;
+            }
+        };
+
+        new SagaHistorySubscriber($sink, new NullLogger, FrozenClock::at('2026-07-18T10:00:00.000000Z'))
+            ->onSagaFamilyCrossingUnresolved(new SagaFamilyCrossingUnresolved('TransferWorkflow', 'corr-1', 4, 'await_children', 'test.retired_conclusion'));
+
+        self::assertNotNull($sink->entry);
+        self::assertSame(
+            ['SagaFamilyCrossingUnresolved', 'TransferWorkflow', 'corr-1', 4, ['waitKey' => 'await_children', 'eventType' => 'test.retired_conclusion']],
+            [$sink->entry->eventType, $sink->entry->workflowType, $sink->entry->correlationId, $sink->entry->generation, $sink->entry->payload],
+        );
     }
 
     /**
@@ -189,6 +215,12 @@ final class SagaHistorySubscriberTest extends TestCase
             'SagaOutcomeDiscarded',
         ];
 
+        yield 'outcome deferred' => [
+            'onSagaOutcomeDeferred',
+            new SagaOutcomeDeferred('TransferWorkflow', 'corr-1', 1, 'charged', stdClass::class),
+            'SagaOutcomeDeferred',
+        ];
+
         yield 'child spawn skipped' => [
             'onSagaChildSpawnSkipped',
             new SagaChildSpawnSkipped('TransferWorkflow', 'corr-1', 1, 'ChargeWorkflow', 'charge', 'already spawned'),
@@ -209,8 +241,14 @@ final class SagaHistorySubscriberTest extends TestCase
 
         yield 'family crossing replayed' => [
             'onSagaFamilyCrossingReplayed',
-            new SagaFamilyCrossingReplayed('TransferWorkflow', 'corr-1', 1, 'await_children', stdClass::class),
+            new SagaFamilyCrossingReplayed('TransferWorkflow', 'corr-1', 1, 'await_children', 'test.children_concluded'),
             'SagaFamilyCrossingReplayed',
+        ];
+
+        yield 'family crossing unresolved' => [
+            'onSagaFamilyCrossingUnresolved',
+            new SagaFamilyCrossingUnresolved('TransferWorkflow', 'corr-1', 1, 'await_children', 'test.retired_conclusion'),
+            'SagaFamilyCrossingUnresolved',
         ];
 
         yield 'retimed' => [
@@ -265,11 +303,10 @@ final class SagaHistorySubscriberTest extends TestCase
     #[Test]
     public function every_declared_handler_is_exercised_by_the_forwarding_suite(): void
     {
-        // the structural guard next door proves every saga event HAS a handler, from the parameter
-        // types alone; it cannot see a body. A handler whose body is empty, or that forwards a
-        // hand-built entry instead of delegating, passes it and drops audit rows in silence, so the
-        // forwarding suite has to run every one. This binds the two: a handler added without its
-        // case here fails, rather than joining the list of the silently unexercised
+        // `SagaHistoryCompletenessTest` proves every saga event has a handler from the parameter types
+        // alone, blind to bodies: an empty handler, or one forwarding a hand-built entry, passes it and
+        // drops audit rows in silence, so this suite runs every one and a handler added without its
+        // case here fails
         $exercised = [];
         foreach (self::handledSagaEvents() as [$handler]) {
             $exercised[] = $handler;
@@ -316,14 +353,14 @@ final class SagaHistorySubscriberTest extends TestCase
             }
         };
 
-        // The cardinal assertion: the handler must NOT throw, even though the sink fails.
-        // If it threw, this test would error; the failure would have re-entered the committed saga.
+        // the handler must not throw, even though the sink fails: a throw would error this test, as it
+        // would re-enter the committed saga
         new SagaHistorySubscriber($sink, $logger, FrozenClock::at('2026-07-18T10:00:00.000000Z'))
             ->onSagaStarted(new SagaStarted('TransferWorkflow', 'corr-1', 1, 'started'));
 
         self::assertSame('warning', $logger->level); // surfaced, not silent
         self::assertSame('storm.telemetry.history_write_failed', $logger->message);
-        // this warning is the ONLY trace a dropped audit row leaves, so it names the announcement
+        // this warning is the only trace a dropped audit row leaves, so it names the announcement
         // that was lost and the cause; the exception key is what gives Monolog its backtrace
         self::assertSame(SagaStarted::class, $logger->context['event']);
         self::assertSame('sink down', $logger->context['error_message']);
@@ -333,9 +370,9 @@ final class SagaHistorySubscriberTest extends TestCase
     #[Test]
     public function the_backstop_is_not_pierceable_by_its_own_logger(): void
     {
-        // the double-failure pierce: the sink fails, THEN the fallback warning channel fails; the
-        // "hard backstop" would otherwise let that second throw re-enter the committed saga's post-commit
-        // dispatch, causing redelivery, an aborted timer batch, or skipped compensation. BestEffortLogger holds it.
+        // the double failure: the sink fails, then the fallback warning channel fails; without
+        // `BestEffortLogger` that second throw would re-enter the committed saga's post-commit dispatch,
+        // causing redelivery, an aborted timer batch or a skipped compensation
         $sink = new class() implements SagaHistorySink
         {
             public function record(SagaHistoryEntry $entry): void

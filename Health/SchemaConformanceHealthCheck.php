@@ -10,17 +10,23 @@ use Storm\Telemetry\Schema\SchemaConformanceTarget;
 use Throwable;
 
 /**
- * Whether the installed schema still matches what each module declares, read between two installs:
- * the same catalog interrogation the installers run inside their transaction, run on demand against
- * the live schema.
+ * Checks between two installs that the installed schema still matches what each module declares, by
+ * running on demand the catalog interrogation the installers run inside their transaction.
  *
- * An install proves its schema and rolls back otherwise; what drifts afterwards, an index or a
- * constraint dropped by hand, a column type changed, is read by nothing until a write fails. This
- * check reads it: `Degraded` from the first divergence, naming the module, the problems and the
- * installer whose re-run converges what its DDL knows how to recreate; `Ok` naming the modules
- * verified. A module whose first table is absent is not installed and reads as such. `Down` is
- * reserved for a failing catalog query. It interrogates the catalogs of every table it is given,
- * a cost per call that a health endpoint, not a scrape loop, is meant to pay.
+ * An install proves its schema or rolls back, but a later drift, such as an index or a constraint
+ * dropped by hand or a column type changed, is read by nothing until a write fails. This check reads
+ * it:
+ *
+ * - `Degraded` from the first divergence, naming the module, the problems and the installer whose
+ *   re-run converges what its DDL knows how to recreate.
+ *
+ * - `Ok` naming the modules verified; a module whose first table is absent is not installed and
+ *   reads as such.
+ *
+ * - `Down` only for a failing catalog query.
+ *
+ * It interrogates the catalogs of every table it is given, a cost per call meant for a health
+ * endpoint rather than a scrape loop.
  */
 final readonly class SchemaConformanceHealthCheck implements SqlHealthCheck
 {

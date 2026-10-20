@@ -7,11 +7,13 @@ namespace Storm\Telemetry\Metrics;
 use InvalidArgumentException;
 
 /**
- * A named metric family and its samples, the unit the text renderer speaks: one `# HELP` and
- * `# TYPE` header, then one line per sample. The name is validated against the Prometheus
- * grammar at construction: an out-of-grammar name from an app collector would make the parser
- * reject the WHOLE exposition body, so the refusal happens here, where the exposition's
- * per-collector backstop turns it into an error sample instead of a dead endpoint.
+ * A named metric family and its samples, the unit the text renderer writes: one `# HELP` and
+ * `# TYPE` header, then one line per sample.
+ *
+ * The name is validated against the Prometheus grammar at construction. An out-of-grammar name from
+ * an app collector would make the parser reject the whole exposition body, so the refusal happens
+ * here, where the exposition's per-collector backstop turns it into an error sample instead of a dead
+ * endpoint.
  */
 final readonly class MetricFamily
 {
@@ -39,9 +41,10 @@ final readonly class MetricFamily
             ));
         }
 
-        // the same refusal doctrine as the name: an out-of-union type would reach the renderer as
-        // an invalid Prometheus TYPE line and invalidate the whole scrape body
-        // @phpstan-ignore booleanAnd.alwaysFalse, notIdentical.alwaysFalse (the PHPDoc union is no runtime guarantee; the gate exists for the callers the analyzer cannot see)
+        // refused like the name: an out-of-union type would reach the renderer as an invalid
+        // Prometheus `TYPE` line and invalidate the whole scrape body; the PHPDoc union is no runtime
+        // guarantee, and this gate serves the callers the analyzer cannot see
+        // @phpstan-ignore booleanAnd.alwaysFalse, notIdentical.alwaysFalse
         if ($type !== 'gauge' && $type !== 'counter') {
             throw new InvalidArgumentException(sprintf('A metric family type must be "gauge" or "counter", got "%s".', $type));
         }
@@ -56,8 +59,8 @@ final readonly class MetricFamily
     }
 
     /**
-     * A counter derived from an at-rest count may RESET when its source is pruned; Prometheus
-     * counter semantics absorb resets, `rate()` and `increase()` stay correct.
+     * A counter derived from an at-rest count may reset when its source is pruned; Prometheus
+     * counter semantics absorb resets, so `rate()` and `increase()` stay correct.
      *
      * @param  list<MetricSample>  $samples
      */

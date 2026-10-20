@@ -9,11 +9,12 @@ use Storm\Telemetry\BestEffortLogger;
 use Throwable;
 
 /**
- * Wraps a sink so a recording failure degrades to a logged drop, never a thrown exception; the cardinal
- * rule of an observability layer is that the observer must not break the observed. Its place is per-child
- * inside a `FanOutSagaHistorySink`: one sink failing, on a DB blip or a down log transport, must not
- * starve the others. The subscriber keeps its own top-level backstop for the engine-safety guarantee;
- * this decorator adds the sibling-isolation that a bare fan-out lacks.
+ * Wraps a sink so a recording failure ends as a logged drop, never a thrown exception, since the
+ * observer must not break the observed.
+ *
+ * It belongs on each child of a `FanOutSagaHistorySink`: one sink failing on a database blip or a down
+ * log transport must not keep the others from recording. The subscriber keeps its own backstop for the
+ * engine's safety; this decorator adds the sibling isolation a bare fan-out lacks.
  *
  * @see FanOutSagaHistorySink
  */
@@ -33,8 +34,8 @@ final readonly class BestEffortSagaHistorySink implements SagaHistorySink
         try {
             $this->inner->record($entry);
         } catch (Throwable $e) {
-            // A dropped audit row is the acceptable degradation; a propagated throw is not. The
-            // warning itself must hold that same promise, hence the BestEffortLogger wrap at construction.
+            // a dropped audit row is the accepted degradation; the warning must not throw either,
+            // hence the `BestEffortLogger` wrap at construction
             $this->logger->warning('storm.telemetry.history_write_failed', [
                 'sink' => $this->inner::class,
                 'event_type' => $entry->eventType,

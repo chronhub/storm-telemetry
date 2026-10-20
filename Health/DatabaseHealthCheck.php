@@ -8,12 +8,14 @@ use Doctrine\DBAL\Connection;
 use Throwable;
 
 /**
- * Pings the DBAL connection with a `SELECT 1`. Stays minimal on purpose; the goal is "can we reach
- * Postgres at all, are credentials OK, is the wire up". Anything fancier such as replication lag,
- * connection pool saturation, or autovacuum stats belongs in app-specific health checks built on top.
+ * Pings the DBAL connection with a `SELECT 1`.
  *
- * Ships out of the box because every Storm consumer uses DBAL; auto-registered via the
- * `storm.health_check` autoconfigure tag on the `HealthCheck` interface.
+ * It answers whether Postgres is reachable at all, the credentials work and the wire is up, and
+ * nothing more. Replication lag, connection pool saturation or autovacuum statistics belong in
+ * app-specific checks built on top.
+ *
+ * It ships out of the box because every Storm consumer uses DBAL, and registers through the
+ * `storm.health_check` autoconfigure tag of the `HealthCheck` interface.
  */
 final readonly class DatabaseHealthCheck implements SqlHealthCheck
 {
@@ -46,9 +48,8 @@ final readonly class DatabaseHealthCheck implements SqlHealthCheck
 
             return HealthCheckResult::ok();
         } catch (Throwable $e) {
-            // class only, never the driver message: it carries host, port, database and SQL details,
-            // and this result is serialized into the health endpoint's HTTP body. The full exception
-            // belongs to the failing component's own logs.
+            // class only, never the driver message: it carries host, port, database and SQL details
+            // into the HTTP body; the full exception belongs to the failing component's own logs
             return HealthCheckResult::down('database unavailable ('.$e::class.')');
         }
     }

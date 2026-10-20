@@ -8,16 +8,20 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception;
 
 /**
- * True event COUNTERS for the saga lifecycle, derived from `workflow_history`: escalations, skips,
- * retries, overdue waits and every other recorded announcement, one series per workflow type and
- * event type, both bounded vocabularies. A scrape can only count what leaves a trace at rest, and
- * the history table is that trace.
+ * True event counters of the saga lifecycle, derived from `workflow_history`, one series per workflow
+ * type and event type, both bounded vocabularies.
  *
- * The honesty of the derivation lives in the help line: the counts exist only while a TABLE sink
- * records, a zero under a log-only or null sink means "not recorded", never "never happened", and
- * `storm:telemetry:prune` resets them, which Prometheus counter semantics absorb. Per-reason
- * drill-down stays in the rows themselves, the history surfaces; a reason label can join later if
- * a dashboard earns it.
+ * They count escalations, skips, retries, overdue waits and every other recorded announcement. A
+ * scrape can only count what leaves a trace at rest, and the history table is that trace.
+ *
+ * The help line states the limits of that derivation:
+ *
+ * - The counts exist only while a table sink records.
+ * - A zero under a log-only or null sink means "not recorded", never "never happened".
+ * - `storm:telemetry:prune` resets them, which Prometheus counter semantics absorb.
+ *
+ * Per-reason drill-down stays in the rows themselves, through the history surfaces; a reason label
+ * can join if a dashboard needs it.
  */
 final readonly class SagaHistoryMetricsCollector implements MetricsCollector
 {

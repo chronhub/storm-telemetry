@@ -5,15 +5,16 @@ declare(strict_types=1);
 namespace Storm\Telemetry\History;
 
 /**
- * Where a saga's lifecycle history goes: the strategy seam. The `SagaHistorySubscriber` normalizes
- * each engine `Saga*` event into a `SagaHistoryEntry` and hands it here; the implementation decides
- * the destination, whether a queryable table, a log stream shipped to an external sink, an async
- * publish, or several at once via a `FanOutSagaHistorySink`.
+ * Where a saga's lifecycle history goes, the strategy seam.
  *
- * An implementation MAY throw, for instance on a DB blip or an encode failure. It is the caller's job
- * to keep that off the observed saga: the subscriber wraps the call in a backstop catch, and a fan-out
- * wraps each child in `BestEffortSagaHistorySink` for per-sink isolation. So a sink stays free to fail
- * loudly; the boundary around it guarantees the engine never sees it.
+ * `SagaHistorySubscriber` turns each engine `Saga*` event into a `SagaHistoryEntry` and hands it here,
+ * and the implementation decides the destination: a queryable table, a log stream shipped to an
+ * external sink, an async publish, or several at once through a `FanOutSagaHistorySink`.
+ *
+ * An implementation may throw, on a database blip or an encode failure for instance, and the caller
+ * keeps that off the observed saga: the subscriber wraps the call in a backstop catch, and a fan-out
+ * wraps each child in `BestEffortSagaHistorySink` for per-sink isolation. A sink stays free to fail
+ * loudly, since the boundary around it guarantees the engine never sees the failure.
  */
 interface SagaHistorySink
 {

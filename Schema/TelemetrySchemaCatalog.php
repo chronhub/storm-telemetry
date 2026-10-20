@@ -9,14 +9,15 @@ use Storm\Telemetry\Console\InstallTelemetryCommand;
 
 /**
  * What `storm:telemetry:install` proves after its DDL: `workflow_history` as the sink relies on it.
- * The module's own verification data, kept beside the `*Schema` class it mirrors, exactly as Saga keeps
- * `SagaSchemaCatalog`; Telemetry is opt-in and depends on no core package, only on the shared
- * {@see \Storm\Support\Dbal\SchemaProbe} that reads this.
  *
- * Why the install verifies rather than trusts its own DDL: the statements are `CREATE TABLE IF NOT
- * EXISTS`, so a `workflow_history` predating a column keeps its old shape silently and fails only
- * later, inside the sink's INSERT, on a path the subscriber's backstop deliberately swallows. Proving
- * the shape at install turns that into a refusal at the moment someone can act on it.
+ * This is the module's own verification data, kept beside the `*Schema` class it mirrors as Saga
+ * keeps `SagaSchemaCatalog`. Telemetry is opt-in and depends on no core package, only on the shared
+ * {@see \Storm\Support\Dbal\SchemaProbe} that reads it.
+ *
+ * The install verifies rather than trusts its own DDL because the statements are
+ * `CREATE TABLE IF NOT EXISTS`: a `workflow_history` predating a column keeps its old shape in silence
+ * and fails only later, inside the sink's `INSERT`, on a path the subscriber's backstop swallows.
+ * Proving the shape at install turns that into a refusal at the moment someone can act on it.
  *
  * @see InstallTelemetryCommand the installer that runs the probe inside its transaction
  */
@@ -24,10 +25,11 @@ final class TelemetrySchemaCatalog
 {
     /**
      * Every column the table must expose, pinned to the shape the probe composes from the live
-     * catalogs, `format_type` plus its nullability; the full set `WorkflowHistorySchema` declares.
-     * A homonym with the right names but a narrower type or a flipped nullability fails exactly
-     * where the class docblock says: inside the sink's INSERT, swallowed. A null value here would
-     * fall back to a presence-only check.
+     * catalogs, `format_type` plus its nullability, the full set `WorkflowHistorySchema` declares.
+     *
+     * A homonym with the right names but a narrower type or a flipped nullability would otherwise fail
+     * inside the sink's `INSERT`, swallowed. A null value here would fall back to a presence-only
+     * check.
      *
      * @var array<string, array<string, string|null>>
      */
@@ -46,11 +48,12 @@ final class TelemetrySchemaCatalog
     ];
 
     /**
-     * Named constraints per table; a non-null value opening on its definition keyword is the
-     * complete definition the live `pg_get_constraintdef` must equal, and any other is a fragment it
-     * must contain, the rule `ConstraintShape` applies. The single primary key pins its column,
-     * `PRIMARY KEY (…)` deparsing verbatim, so a homonym keyed differently is refused at install
-     * rather than discovered at read time.
+     * Named constraints per table, read by the rule `ConstraintShape` applies.
+     *
+     * A non-null value opening on its definition keyword is the complete definition the live
+     * `pg_get_constraintdef` must equal, and any other is a fragment it must contain. The single
+     * primary key pins its column, `PRIMARY KEY (…)` deparsing verbatim, so a homonym keyed
+     * differently is refused at install rather than discovered at read time.
      *
      * @var array<string, array<string, string|null>>
      */
@@ -59,9 +62,10 @@ final class TelemetrySchemaCatalog
     ];
 
     /**
-     * Indexes per table; a non-null value is a fragment the live `indexdef` must contain. The composite
-     * order is what makes the per-correlation history read cheap, and `CREATE INDEX IF NOT EXISTS` never
-     * verifies that a homonym kept it.
+     * Indexes per table; a non-null value is a fragment the live `indexdef` must contain.
+     *
+     * The composite order is what makes the per-correlation history read cheap, and
+     * `CREATE INDEX IF NOT EXISTS` never verifies that a homonym kept it.
      */
     public const array INDEXES = [
         'workflow_history' => [
@@ -70,7 +74,7 @@ final class TelemetrySchemaCatalog
     ];
 
     /**
-     * The declared shape as verification DATA, so the shared probe can read it.
+     * The declared shape as verification data, so the shared probe can read it.
      */
     public static function catalog(): SchemaCatalog
     {

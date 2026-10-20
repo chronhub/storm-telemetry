@@ -7,25 +7,25 @@ namespace Storm\Telemetry\Health;
 use Storm\Telemetry\HealthChecker;
 
 /**
- * One health probe: a small, named, side-effect-light check that the operator can run on demand via
- * `/_storm/health`. The framework ships a couple of generic checks such as a DBAL ping; the app adds
- * its own, for example RabbitMQ, Redis, a third-party API, or business invariants.
+ * One health probe: a small, named check with few side effects that an operator runs on demand
+ * through `/_storm/health`.
  *
- * Auto-tagged. The bundle's `loadExtension` registers `storm.health_check` as the autoconfigure tag
- * for every class implementing this interface, the same convention as Saga's `Activity` and
- * `Workflow`. Implement the interface and the `HealthChecker` picks the service up; no manual DI
- * declaration.
+ * The framework ships a few generic checks such as a DBAL ping, and the app adds its own, for example
+ * RabbitMQ, Redis, a third-party API or a business invariant.
+ *
+ * The bundle's `loadExtension` registers `storm.health_check` as the autoconfigure tag of every class
+ * implementing this interface, the convention of Saga's `Activity` and `Workflow`: `HealthChecker`
+ * picks up an implementing service with no manual DI declaration.
  *
  * Implementation rules:
  *
- * - `name()` must be stable and URL-safe; it is used as the key in the JSON response and operators
- *   grep it.
+ * - `name()` must be stable and URL-safe: it keys the JSON response, and operators grep it.
  *
- * - `check()` must be bounded; set a timeout if it hits IO, since the controller is sync. A check
- *   that takes 30s is itself a bug.
+ * - `check()` must be bounded, with a timeout on any I/O, since the controller is synchronous; a
+ *   check that takes 30s is itself a bug.
  *
- * - `check()` must not throw; catch every `Throwable` and return `HealthCheckResult::down()` with
- *   the message. The checker has a backstop catch, but doing it in the implementation is cleaner.
+ * - `check()` must not throw: catch every `Throwable` and return `HealthCheckResult::down()` with
+ *   the message. The checker has a backstop catch, but the implementation is the cleaner place.
  *
  * @see HealthChecker
  */

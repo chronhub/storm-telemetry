@@ -19,7 +19,8 @@ use Storm\Support\Dbal\SchemaCatalog;
 final readonly class SchemaConformanceTarget
 {
     /**
-     * @param  list<string>  $tables  the tables the module owns on this connection, every one a key of the catalog
+     * @param  list<string>  $tables  the tables the module owns on this connection, every one a key of
+     *                                the catalog
      */
     public function __construct(
         public string $module,

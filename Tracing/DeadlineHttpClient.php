@@ -13,7 +13,9 @@ use RuntimeException;
 use Symfony\Component\HttpClient\Psr18Client;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
-/** Uses the remaining drain budget, including time already spent serializing earlier batches. */
+/**
+ * Uses the remaining drain budget, including time already spent serializing earlier batches.
+ */
 final readonly class DeadlineHttpClient implements ClientInterface
 {
     public function __construct(private HttpClientInterface $client, private ExportBudget $budget) {}

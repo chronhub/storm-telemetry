@@ -47,9 +47,9 @@ final class FanOutSagaHistorySinkTest extends TestCase
     #[Group('adversarial')]
     public function does_not_catch_so_a_throwing_child_starves_its_later_siblings(): void
     {
-        // the class's contract is a plain loop that does NOT catch: per-sink isolation belongs to
-        // BestEffortSagaHistorySink around each child, and this pin is that decorator's entire
-        // justification; a catch added here, or a reordered loop, must fail this test
+        // the contract is a plain loop that does not catch: per-sink isolation belongs to the
+        // `BestEffortSagaHistorySink` around each child, which this pin justifies, so a catch added
+        // here or a reordered loop must fail this test
         $thrower = new class() implements SagaHistorySink
         {
             public function record(SagaHistoryEntry $entry): void

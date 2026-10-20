@@ -29,8 +29,8 @@ final class TracingHttpTest extends TestCase
 
     protected function setUp(): void
     {
-        // the SDK reports a failed export on its internal log, STDERR by default under the CLI; the
-        // failures below are provoked on purpose, so their reports are read here instead of leaking
+        // the SDK reports a failed export on its internal log, STDERR by default under the CLI; this
+        // test provokes the failures below, so their reports are read here instead of leaking
         $this->sdkLog = new RecordingLogger;
         LoggerHolder::set($this->sdkLog);
         Logging::reset();
@@ -65,14 +65,19 @@ final class TracingHttpTest extends TestCase
     #[Test]
     public function multiple_batches_share_the_same_deadline(): void
     {
+        // the budget reads this clock alone, and each request advances it by 20 ms, so the batches
+        // consume the deadline the same way whatever the real time a loaded runner spends between them
+        $now = 0;
         $durations = [];
-        $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$durations): MockResponse {
+        $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$durations, &$now): MockResponse {
             $durations[] = $options['max_duration'];
-            usleep(20000);
+            $now += 20_000_000;
 
             return new MockResponse('');
         });
-        $budget = new ExportBudget(100);
+        $budget = new ExportBudget(100, static function () use (&$now): int {
+            return $now;
+        });
         $factory = new Psr17Factory;
         $transport = new PsrTransportFactory(new DeadlineHttpClient($client, $budget), $factory, $factory)
             ->create('http://localhost/v1/traces', 'application/x-protobuf', maxRetries: 0);
@@ -82,8 +87,8 @@ final class TracingHttpTest extends TestCase
         $tracer->spanBuilder('two')->startSpan()->end();
         self::assertTrue($processor->forceFlush());
         self::assertCount(2, $durations);
-        self::assertLessThan($durations[0] - 0.015, $durations[1]);
-        self::assertLessThanOrEqual(0.1, $durations[0]);
+        self::assertSame(0.1, $durations[0], 'the first batch starts with the whole 100 ms budget');
+        self::assertSame(0.08, $durations[1], 'the second batch inherits the deadline, less the 20 ms the first consumed');
     }
 
     #[Test]

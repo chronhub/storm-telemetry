@@ -75,7 +75,7 @@ final class StormObservabilityTest extends TestCase
     public function records_a_stale_occ_conflict_at_info(): void
     {
         // the CAS pre-check losing to a concurrent head move is normal contention, absorbed by the
-        // retry boundary upstream; logging it as a warning drowned the level in noise
+        // retry boundary upstream; logging it as a warning would drown the level in noise
         $ctx = new OccConflictContext('account-x', 'account', 5, 7, 'stale');
 
         $this->observability->recordOccConflict($ctx);
@@ -89,7 +89,7 @@ final class StormObservabilityTest extends TestCase
     #[Test]
     public function records_a_duplicate_occ_conflict_at_warning(): void
     {
-        // the UNIQUE backstop caught a second writer landing the same version: the anomaly keeps eyes
+        // the `UNIQUE` backstop caught a second writer landing the same version: the anomaly stays a warning
         $ctx = new OccConflictContext('account-x', 'account', 5, 5, 'duplicate');
 
         $this->observability->recordOccConflict($ctx);
@@ -111,14 +111,15 @@ final class StormObservabilityTest extends TestCase
             [['info', 'storm.projector.batch', ['module' => 'projector', 'operation' => 'batch', ...(array) $ctx]]],
             $this->logger->records,
         );
-        self::assertSame(5, $this->logger->records[0][2]['lag']); // the per-cycle lag metric rides the batch log
+        // the per-cycle lag metric travels in the batch log
+        self::assertSame(5, $this->logger->records[0][2]['lag']);
     }
 
     #[Test]
     public function a_pure_noop_scan_stays_silent_while_a_zero_batch_with_lag_still_logs(): void
     {
         // a daemon on an idle system polls forever: one info line per empty poll is standing noise.
-        // Silence requires ALL THREE zeros; nothing seen with a positive lag is a stall worth a line
+        // Silence requires all three zeros; nothing seen with a positive lag is a stall worth a line
         $this->observability->recordBatch(new BatchContext('account_balance', 0, 0.3, lag: 0));
         self::assertSame([], $this->logger->records);
 
@@ -126,8 +127,8 @@ final class StormObservabilityTest extends TestCase
         self::assertCount(1, $this->logger->records);
         self::assertSame(12, $this->logger->records[0][2]['lag']);
 
-        // the single-cursor's empty advance: events SEEN with none applied is the cursor traversing
-        // foreign traffic, the ops discriminant the BatchContext docblock names; it must log
+        // the single-cursor's empty advance: events seen with none applied is the cursor traversing
+        // foreign traffic, the ops discriminant the `BatchContext` docblock names; it must log
         $this->observability->recordBatch(new BatchContext('account_balance', 7, 0.3, lag: 0, applied: 0));
         self::assertCount(2, $this->logger->records);
         self::assertSame(7, $this->logger->records[1][2]['eventCount']);
@@ -166,14 +167,15 @@ final class StormObservabilityTest extends TestCase
         self::assertSame(RuntimeException::class, $context['error_class']);
         self::assertSame('boom', $context['error_message']);
         self::assertSame($error, $context['exception']);   // Monolog renders the backtrace
-        self::assertArrayNotHasKey('error', $context);      // the raw Throwable isn't double-logged under 'error'
+        self::assertArrayNotHasKey('error', $context);      // the raw Throwable is not logged twice
     }
 
     #[Test]
     public function records_a_commit_listener_failure_at_warning_with_the_exception(): void
     {
-        // warning, not error: the batch is durably committed and the projection keeps running, but a
-        // side-channel that keeps failing (a stale cache until TTL) needs an operator's eye, not a rollback.
+        // warning rather than error: the batch is durably committed and the projection keeps running,
+        // but a side channel that keeps failing, such as a cache stale until its TTL, needs an operator
+        // rather than a rollback
         $error = new RuntimeException('cache purge failed');
         $ctx = new ListenerFailureContext('account_balance', $error);
 
@@ -215,8 +217,8 @@ final class StormObservabilityTest extends TestCase
     #[Test]
     public function a_throwing_logger_never_escapes_any_emission(): void
     {
-        // the ports' fail-open contract, honored by THIS implementation: recordAppend fires inside
-        // the append transaction and recordRun inside the runner's finally; a logger outage there
+        // the ports' fail-open contract, honored by this implementation: `recordAppend()` fires inside
+        // the append transaction and `recordRun()` in the runner's `finally`; a logger outage there
         // must never roll back an append or mask a run's real outcome
         $hostile = new class() extends AbstractLogger
         {

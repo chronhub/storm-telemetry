@@ -10,17 +10,27 @@ use Storm\Contracts\Clock\Clock;
 use Throwable;
 
 /**
- * Whether the application's clock and the database's agree: the application mints the instants
- * its timers are armed and claimed against, the database mints the heartbeats and the leases, and
- * a host whose time jumped or drifted fires the one against the other, saga timers early or late
- * against every horizon, ages and leases read against a clock that moved. Nothing else names the
- * jump: the timers fire, the sagas move, and every row looks legitimate.
+ * Checks that the application's clock and the database's agree.
  *
- * `Degraded` from the threshold, naming the direction and the seconds; `Ok` naming the agreement.
- * `Down` is reserved for a failing read. The threshold is seconds of skew, not of drift rate: a
- * host that drifts slowly crosses it late, which is what a time daemon exists to prevent; a
- * deployment whose tempos are seconds sets it lower. Which of the two hosts moved, only true
- * time says: the check reads them against each other and blames neither.
+ * The application mints the instants its timers are armed and claimed against, and the database
+ * mints the heartbeats and the leases. When one host's time jumps or drifts, the two clocks act
+ * against each other:
+ *
+ * - Saga timers fire early or late against every horizon.
+ * - Ages and leases are read against a clock that moved.
+ *
+ * Nothing else names the jump: the timers fire, the sagas move, and every row looks legitimate.
+ *
+ * Its verdicts:
+ *
+ * - `Ok` names the agreement.
+ * - `Degraded` from the threshold on, naming the direction and the seconds.
+ * - `Down` only for a failing read.
+ *
+ * The threshold counts seconds of skew rather than a drift rate, so a host that drifts slowly crosses
+ * it late, which a time daemon exists to prevent; a deployment whose tempos are seconds sets it
+ * lower. Only true time says which host moved: the check reads the two clocks against each other and
+ * blames neither.
  */
 final readonly class ClockSkewHealthCheck implements SqlHealthCheck
 {

@@ -7,42 +7,50 @@ namespace Storm\Telemetry\Schema;
 use Storm\Telemetry\SagaHistorySubscriber;
 
 /**
- * Raw PostgreSQL DDL for `workflow_history`: one row per `Saga*` domain event written by the
- * `SagaHistorySubscriber`. A best-effort observability trail of a saga's life, queryable by
- * `(workflow_type, correlation_id, recorded_at)`. It may drop or duplicate rows, since the writing is
- * post-commit and best-effort; the event store stays the source of truth.
+ * Raw PostgreSQL DDL for `workflow_history`, one row per `Saga*` domain event that
+ * `SagaHistorySubscriber` writes.
  *
- * Two timestamps, two meanings: `occurred_at` is the ANNOUNCE time, minted by the subscriber before
- * any fan-out or async hop; order a saga's life by `(occurred_at, id)`. `recorded_at` is the ARRIVAL
- * time at this table; on the async strategy that is consumption time, after queueing and retries, so
- * it orders ingestion, not the saga. `id` is the monotonic insertion-order tiebreak.
+ * It is a best-effort observability trail of a saga's life, queryable by
+ * `(workflow_type, correlation_id, occurred_at)`. The writing is post-commit and best-effort, so the
+ * trail may drop or duplicate rows; the event store stays the source of truth.
  *
- * Duplicates are DISTINGUISHABLE, not prevented: `event_id` is minted once at the announcement, so two
- * rows sharing one are the same announcement redelivered, while two distinct events always differ,
- * even two legitimate `SagaRetried` of one saga. There is deliberately no unique constraint: the sink
- * stays a blind append, because a unique index here would tax the saga's own transaction on the sync
- * strategy, and the READER holds the other half of that contract, deduplicating on `event_id`
- * before its window and its truncation verdict. No grouping heuristic can substitute:
- * `(workflow_type, correlation_id, event_type)` would merge genuinely distinct events.
+ * Two timestamps carry two meanings, and `id` breaks their ties:
  *
- * `generation` is the registry's run counter, riding every announcement: the trail OUTLIVES the run
- * it records, the same criterion that puts `generation` on `workflow_outbox` and deliberately not
- * on `workflow_timers`, so under `#[Workflow(reuse: Allow)]` a correlation's second life reads as
- * its own timeline instead of blending into the first. 0 is the honest unknown: a pre-generation
- * wire entry, or a skip announcement made without the claimed row in hand.
+ * - `occurred_at` is the announce time, minted by the subscriber before any fan-out or async hop;
+ *   a saga's life is ordered by `(occurred_at, id)`.
  *
- * Opt-in by being in this package: the framework's saga itself does not write here, only the Telemetry
- * subscriber does. Apps that want the trail run `storm:telemetry:install`, separate from
+ * - `recorded_at` is the arrival time at this table. Under the async strategy it is consumption time,
+ *   after queueing and retries, so it orders ingestion rather than the saga.
+ *
+ * - `id` is the monotonic insertion-order tiebreak.
+ *
+ * Duplicates are distinguishable rather than prevented: `event_id` is minted once at the
+ * announcement, so two rows sharing one are the same announcement redelivered, while two distinct
+ * events always differ, even two legitimate `SagaRetried` of one saga. The table has no unique
+ * constraint: the sink stays a blind append, because a unique index would tax the saga's own
+ * transaction under the sync strategy, and the reader holds the other half of that contract,
+ * deduplicating on `event_id` before its window and its truncation verdict. No grouping heuristic can
+ * substitute, since `(workflow_type, correlation_id, event_type)` would merge genuinely distinct
+ * events.
+ *
+ * `generation` is the registry's run counter, carried by every announcement. The trail outlives the
+ * run it records, the criterion that puts `generation` on `workflow_outbox` and leaves it off
+ * `workflow_timers`, so under `#[Workflow(reuse: Allow)]` a correlation's second life reads as its
+ * own timeline instead of blending into the first. 0 is the honest unknown: a pre-generation wire
+ * entry, or a skip announcement made without the claimed row in hand.
+ *
+ * The table is opt-in by living in this package: the framework's saga does not write here, only the
+ * Telemetry subscriber does. Apps that want the trail run `storm:telemetry:install`, apart from
  * `storm:install` and `storm:saga:install`, just as `storm:saga:install` is itself opt-in.
  *
- * `correlation_id` is a business key stored in PLAINTEXT, outside the crypto-shredding veil that
- * covers event payloads: when an app's correlation ids carry personal data, retention alone cannot
- * answer an erasure request, so `storm:telemetry:prune --correlation` and the store's
- * `deleteForCorrelation()` are the targeted lever.
+ * `correlation_id` is a business key stored in plaintext, outside the crypto-shredding that covers
+ * event payloads. When an app's correlation ids carry personal data, retention alone cannot answer an
+ * erasure request, so `storm:telemetry:prune --correlation` and the store's `deleteForCorrelation()`
+ * are the targeted deletion.
  *
  * The DDL is create-only: `IF NOT EXISTS` never alters an existing table, so a `workflow_history`
- * missing a column keeps its old shape, and the sink's INSERT then fails loud into the subscriber's
- * backstop until the table is recreated, which in dev means `--reset`.
+ * missing a column keeps its old shape, and the sink's `INSERT` then fails loudly into the
+ * subscriber's backstop until the table is recreated, which in dev means `--reset`.
  *
  * @see SagaHistorySubscriber
  */
@@ -71,9 +79,9 @@ final class WorkflowHistorySchema
                     CONSTRAINT workflow_history_pk PRIMARY KEY (id)
                 )
                 SQL,
-            // the axis IS the read: the timeline filters on (type, corr) and reads in
-            // (occurred_at, id) life order. recorded_at earns no slot: no query filters or orders
-            // by it under the leading columns.
+            // the index follows the read: the timeline filters on type and correlation and reads in
+            // `(occurred_at, id)` life order, while no query filters or orders by `recorded_at` under
+            // those leading columns
             /* language=PostgreSQL */
             <<<'SQL'
                 CREATE INDEX IF NOT EXISTS workflow_history_corr_idx

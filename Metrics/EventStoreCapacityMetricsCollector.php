@@ -18,9 +18,6 @@ final readonly class EventStoreCapacityMetricsCollector implements MetricsCollec
         private Connection $connection,
     ) {}
 
-    /**
-     * @return list<MetricFamily>
-     */
     public function families(): array
     {
         if (! $this->connection->createSchemaManager()->tablesExist(['event_store'])) {

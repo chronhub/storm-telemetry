@@ -13,11 +13,13 @@ use Storm\Telemetry\SagaHistorySubscriber;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
 
 /**
- * Completeness guard, not line coverage: every `Storm\Saga\Event\*` must have a recording handler in
- * SagaHistorySubscriber. A NEW saga event added without one is a real, silent bug that loses audit
- * history, and no test that exercises the handlers already there can see it. This check reads the
- * declared parameter types; whether a handler's body forwards at all is the other half, and it belongs
- * to the forwarding suite in SagaHistorySubscriberTest.
+ * Completeness guard rather than line coverage: every `Storm\Saga\Event\*` must have a recording
+ * handler in `SagaHistorySubscriber`.
+ *
+ * A new saga event added without one is a real, silent bug that loses audit history, and no test
+ * exercising the existing handlers can see it. This check reads the declared parameter types; whether
+ * a handler's body forwards at all is the other half, and it belongs to the forwarding suite in
+ * `SagaHistorySubscriberTest`.
  */
 final class SagaHistoryCompletenessTest extends TestCase
 {
@@ -34,8 +36,10 @@ final class SagaHistoryCompletenessTest extends TestCase
     }
 
     /**
-     * Every concrete `Storm\Saga\Event\*` class, discovered from the namespace's directory. The directory
-     * is located via an autoloaded anchor, so it survives the monorepo-to-split move.
+     * Every concrete `Storm\Saga\Event\*` class, discovered from the namespace's directory.
+     *
+     * An autoloaded anchor locates the directory, so the discovery works in the monorepo and in the
+     * split packages alike.
      *
      * @return list<class-string>
      */

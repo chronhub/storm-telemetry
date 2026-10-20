@@ -10,18 +10,21 @@ use Storm\Projector\Store\ProjectionCatalog;
 use Storm\Projector\Store\ProjectionStatus;
 
 /**
- * The projector block: per-projection lag against the safe-head floor, status and generation. Lag
- * is measured against `event_store_high_water`, the position every projection is allowed to read
- * to, so it counts events the projection COULD have folded and has not; events above the floor are
+ * The projector block: per-projection lag against the safe-head floor, status, generation, heartbeat
+ * age and expired lease.
+ *
+ * Lag is measured against `event_store_high_water`, the position every projection is allowed to read
+ * to, so it counts events the projection could have folded and has not; events above the floor are
  * nobody's lag yet.
  *
- * Two collaborators because the two facts live apart under a split topology: the checkpoints come
- * from the catalog port, which routes each row to its home, and the floor is a single-row read on
- * the events side, where the event store keeps it. Joining them in one SQL statement would bind the
- * block to a single-database deployment and report an empty projector on every other one.
+ * Two collaborators serve the block because the two facts live apart under a split topology: the
+ * checkpoints come from the catalog port, which routes each row to its home, and the floor is a
+ * single-row read on the events side, where the event store keeps it. Joining them in one SQL
+ * statement would bind the block to a single-database deployment and report an empty projector on
+ * every other one.
  *
- * An idle projection sits at whatever checkpoint it stopped on, so its lag climbs with the floor;
- * the value stays raw and the status family is the join key a query filters on.
+ * An idle projection sits at whatever checkpoint it stopped on, so its lag climbs with the floor; the
+ * value stays raw, and the status family is the join key a query filters on.
  */
 final readonly class ProjectionMetricsCollector implements MetricsCollector
 {

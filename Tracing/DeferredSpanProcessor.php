@@ -15,8 +15,8 @@ use Throwable;
 /**
  * Buffers sampled spans without calling the exporter from `onEnd`.
  *
- * It is not itself the SDK's span processor: `TracingFactory::spanProcessor()` adapts it, so the
- * class loads in an install that left the optional OpenTelemetry SDK out.
+ * `TracingFactory::spanProcessor()` adapts it into the SDK's span processor, so the class loads in an
+ * install that left the optional OpenTelemetry SDK out.
  *
  * Explicit drains discard failed batches. Shutdown discards any remainder, including spans
  * blocked by an open transaction. Tracing never retries business work or keeps a process alive.
@@ -32,7 +32,9 @@ final class DeferredSpanProcessor
 
     private int $dropped = 0;
 
-    /** @param Closure(): bool $safeToExport Checks every connection owned by the application. */
+    /**
+     * @param  Closure(): bool  $safeToExport  checks every connection owned by the application
+     */
     public function __construct(
         private readonly SpanExporterInterface $exporter,
         private readonly Closure $safeToExport,

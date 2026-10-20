@@ -7,6 +7,7 @@ namespace Storm\Telemetry\Console;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception;
 use Override;
+use Storm\Support\Console\DestructiveConfirmation;
 use Storm\Support\Dbal\InstallLock;
 use Storm\Support\Dbal\SchemaProbe;
 use Storm\Telemetry\Schema\TelemetrySchemaCatalog;
@@ -20,32 +21,32 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Throwable;
 
 /**
- * Creates the Telemetry tables, currently only `workflow_history`. Separate from `storm:install` for
- * the core and `storm:saga:install` for the saga on purpose: Telemetry is opt-in, so its schema is
- * opt-in too. An app that wants the persisted saga history runs this in addition to the others.
+ * Creates the Telemetry tables, `workflow_history` alone, apart from `storm:install` for the core and
+ * `storm:saga:install` for the saga: Telemetry is opt-in, so its schema is opt-in too.
  *
- * Carries the same operational contract as `storm:install`:
+ * An app that wants the persisted saga history runs this command in addition to the others. It
+ * carries the operational contract of `storm:install`:
  *
- * - ONE transaction under an advisory lock, so concurrent installs cannot interleave;
+ * - One transaction under an advisory lock, so concurrent installs cannot interleave
  *
  * - The target `current_database()`, `current_schema()` and server version printed before anything
- *   runs;
+ *   runs
  *
- * - A refusal below the PostgreSQL 17 product floor;
+ * - A refusal below the PostgreSQL 17 product floor
  *
  * - The conformance probe inside the transaction, so the command either proves the schema it created
- *   or rolls back untouched.
+ *   or rolls back untouched
  *
- * Three behaviors via mutually exclusive flags, mirroring `storm:install`:
+ * Mutually exclusive flags select one of three behaviors, as in `storm:install`:
  *
- * - No flag runs `up()` only, an idempotent create;
- * - `--drop` runs `down()` only, a drop with no recreate;
- * - `--reset` runs `down()` then `up()`, a drop and recreate.
+ * - No flag runs `up()` only, an idempotent create
+ * - `--drop` runs `down()` only, a drop with no recreate
+ * - `--reset` runs `down()` then `up()`, a drop and recreate
  *
  * `--drop` and `--reset` destroy the recorded trail, so both demand an interactive confirmation
  * naming the target database and schema, or `--force` when no interaction is possible. The trail
- * is an observability record, not the source of truth; the ceremony exists because the command
- * cannot know what an operator's incident review still needs from it.
+ * is an observability record rather than the source of truth, but the command cannot know what an
+ * operator's incident review still needs from it.
  *
  * Examples:
  *
@@ -61,10 +62,15 @@ use Throwable;
 )]
 final class InstallTelemetryCommand extends Command
 {
-    /** "STORMTEL" packed as an int64; the advisory lock serializing telemetry installs/resets per database. */
+    use DestructiveConfirmation;
+
+    /**
+     * `STORMTEL` packed as an int64, the advisory lock serializing telemetry installs and resets per
+     * database.
+     */
     private const int ADVISORY_LOCK_KEY = 0x53544F524D54454C;
 
-    /** The product's documented floor; the check mirrors `storm:install` so every installer refuses the same servers. */
+    /** The documented product floor, as in `storm:install`, so every installer refuses the same servers. */
     private const int MINIMUM_SERVER_VERSION_NUM = 170_000;
 
     public function __construct(
@@ -78,13 +84,13 @@ final class InstallTelemetryCommand extends Command
     {
         $this->addOption('drop', null, InputOption::VALUE_NONE, 'Drop the tables (no re-create). Mutually exclusive with --reset.');
         $this->addOption('reset', null, InputOption::VALUE_NONE, 'Reset: drop the tables then re-create them. Mutually exclusive with --drop.');
-        $this->addOption('force', null, InputOption::VALUE_NONE, 'Confirm --drop/--reset without asking (required when the session is non-interactive).');
+        $this->configureForce('--drop and --reset destroy the recorded telemetry trail');
     }
 
     /**
      * {@inheritDoc}
      *
-     * @throws Exception on a DBAL failure creating / dropping the telemetry tables
+     * @throws Exception on a DBAL failure creating or dropping the telemetry tables
      * @throws Throwable propagated after the install transaction is rolled back
      */
     #[Override]
@@ -110,29 +116,20 @@ final class InstallTelemetryCommand extends Command
 
         if ($drop || $reset) {
             $target = sprintf('%s/%s', $database, $schema);
-            if (! (bool) $input->getOption('force')) {
-                if (! $input->isInteractive()) {
-                    $io->error(sprintf(
-                        '--%s destroys the recorded telemetry trail on %s and the session is non-interactive: pass --force to confirm.',
-                        $drop ? 'drop' : 'reset',
-                        $target,
-                    ));
-
-                    return Command::INVALID;
-                }
-                if (! $io->confirm(sprintf('%s the Telemetry tables on %s?', $drop ? 'Drop' : 'Drop and re-create', $target), false)) {
-                    $io->warning('Aborted — nothing was dropped.');
-
-                    return Command::SUCCESS;
-                }
+            $status = $this->confirmDestructive(
+                $io,
+                $input,
+                sprintf('%s the Telemetry tables on %s?', $drop ? 'Drop' : 'Drop and re-create', $target),
+                sprintf('--%s destroys the recorded telemetry trail on %s.', $drop ? 'drop' : 'reset', $target),
+            );
+            if ($status !== null) {
+                return $status;
             }
         }
 
-        // One transaction under the advisory lock, and the shape is PROVEN inside it before
-        // committing: the DDL is `CREATE TABLE IF NOT EXISTS`, so a table predating a column keeps
-        // its old shape and only fails later, inside the sink's INSERT, on a path the subscriber's
-        // backstop deliberately swallows. Proving it here turns a silent drift into a refusal at
-        // the moment someone can act on it.
+        // the shape is proven before the commit: `CREATE TABLE IF NOT EXISTS` keeps an older table's
+        // shape, which would only fail later in the sink's `INSERT`, a path the subscriber's backstop
+        // swallows; proving it here turns a silent drift into a refusal someone can act on
         $this->connection->beginTransaction();
 
         try {
@@ -182,8 +179,8 @@ final class InstallTelemetryCommand extends Command
     }
 
     /**
-     * Where this connection's DDL lands. The schema is `search_path`-relative by design, so the
-     * target is printed, never assumed.
+     * Where this connection's DDL lands: the schema is `search_path`-relative, so the target is
+     * printed, never assumed.
      *
      * @return array{string, string, string, int} database, schema, server version, numeric version
      *

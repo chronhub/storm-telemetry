@@ -17,8 +17,10 @@ use Storm\Telemetry\Metrics\PrometheusTextRenderer;
 
 /**
  * The Prometheus grammar is enforced at the value objects, where an app collector's bad name is
- * refused before it can invalidate the whole scrape body; the exposition's backstop then turns the
- * refusal into an error sample, which is the difference between one dark block and a dead endpoint.
+ * refused before it can invalidate the whole scrape body.
+ *
+ * The exposition's backstop then turns the refusal into an error sample, the difference between one
+ * missing block and a dead endpoint.
  */
 final class MetricGrammarTest extends TestCase
 {
@@ -50,11 +52,12 @@ final class MetricGrammarTest extends TestCase
     #[Group('adversarial')]
     public function a_family_refuses_a_metric_type_outside_its_public_union(): void
     {
-        // the declared gauge|counter union is enforced at construction: an out-of-union type would
-        // reach the renderer as an invalid Prometheus TYPE line and invalidate the scrape body
+        // the declared `gauge|counter` union is enforced at construction: an out-of-union type would
+        // reach the renderer as an invalid Prometheus `TYPE` line and invalidate the scrape body
         $this->expectException(InvalidArgumentException::class);
 
-        new MetricFamily('storm_jobs', 'histogram-ish', 'jobs', []); // @phpstan-ignore argument.type (deliberate: the string the declared counter|gauge union excludes)
+        // `histogram-ish` is the string the declared `counter|gauge` union excludes
+        new MetricFamily('storm_jobs', 'histogram-ish', 'jobs', []); // @phpstan-ignore argument.type
     }
 
     #[Test]

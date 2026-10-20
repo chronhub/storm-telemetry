@@ -8,26 +8,29 @@ use Doctrine\DBAL\Connection;
 use Throwable;
 
 /**
- * Liveness AND delivery honesty of the transactional outbox. Two signals, worst first:
+ * Checks that the transactional outbox is alive and reports its deliveries honestly.
  *
- * - Dead letters: `failed` rows left the pending index for good; they will never be relayed
- *   without an operator running `storm:outbox:failed`, and they vanish from every pending-backlog
- *   metric at the exact moment they most need eyes. Any `failed` row is `Degraded`, with count and
- *   the oldest's age; "no pending rows" must never read as "everything was delivered".
+ * Two signals, worst first:
  *
- * - Relay lag: the age of the oldest still-`pending` row, `clock_timestamp() - min(occurred_at)`.
- *   Whether the relay runs as a scheduler one-shot or a daemon, nothing else signals that it
- *   stopped, no worker is scheduled, or the broker is down and rows are piling up.
+ * - Dead letters: `failed` rows left the pending index for good, and no relay sends them again until
+ *   an operator runs `storm:outbox:failed`; they vanish from every pending-backlog metric exactly when
+ *   they most need attention. Any `failed` row is `Degraded`, with the count and the oldest's age,
+ *   since "no pending rows" must never read as "everything was delivered".
  *
- * `Degraded`, not `Down`: a lagging or dead-lettered outbox still serves, since events are durably
- * stored; a warning surface, not a pull-the-pod signal. `Down` is reserved for "can't even query".
- * An ABSENT table is `Degraded` too: `es_outbox` is core schema that `storm:install` always creates,
- * so absence is an incomplete install the writer will trip over, never "the feature is off".
+ * - Relay lag: the age of the oldest `pending` row, `clock_timestamp() - min(occurred_at)`. Whether
+ *   the relay runs as a scheduler one-shot or a daemon, nothing else signals that it stopped, that no
+ *   worker is scheduled, or that the broker is down while rows pile up.
  *
- * Reads `es_outbox` by name so Telemetry observes Chronicler's table without a type dependency, the
- * way `DatabaseHealthCheck` knows `SELECT 1`; the name mirrors Chronicler's `OutboxSchema`.
+ * Both are `Degraded` rather than `Down`: a lagging or dead-lettered outbox still serves, since its
+ * events are durably stored, so it raises a warning instead of pulling the pod. `Down` is kept for a
+ * query that cannot run. An absent table is `Degraded` too: `es_outbox` is core schema that
+ * `storm:install` always creates, so its absence is an incomplete install the writer will fail on,
+ * never a feature turned off.
  *
- * Auto-registered via the `storm.health_check` autoconfigure tag on the `HealthCheck` interface.
+ * The check reads `es_outbox` by name, so Telemetry observes Chronicler's table without a type
+ * dependency, as `DatabaseHealthCheck` knows `SELECT 1`; the name mirrors Chronicler's
+ * `OutboxSchema`. The `storm.health_check` autoconfigure tag of the `HealthCheck` interface
+ * registers it.
  */
 final readonly class OutboxLivenessHealthCheck implements SqlHealthCheck
 {
@@ -65,12 +68,16 @@ final readonly class OutboxLivenessHealthCheck implements SqlHealthCheck
     {
         try {
             if (! $this->connection->createSchemaManager()->tablesExist([self::TABLE])) {
-                // es_outbox is CORE schema, storm:install always creates it, so an absent table is
-                // never "the feature is off": it is an incomplete install the writer will trip over.
                 return HealthCheckResult::degraded('es_outbox is absent — storm:install has not run against this database');
             }
 
-            /** @var array{oldest_pending: int|string|null, failed_count: int|string, oldest_failed: int|string|null}|false $row */
+            /**
+             * @var array{
+             *     oldest_pending: int|string|null,
+             *     failed_count: int|string,
+             *     oldest_failed: int|string|null,
+             * }|false $row
+             */
             $row = $this->connection->fetchAssociative(
                 /* language=PostgreSQL */
                 "SELECT
@@ -84,9 +91,7 @@ final readonly class OutboxLivenessHealthCheck implements SqlHealthCheck
 
             $pendingLagging = $oldestPending !== null && $oldestPending >= $this->degradedAfterSeconds;
 
-            // Dead letters first: a failed row left the pending index for good, so it is invisible to
-            // every backlog metric precisely when it most needs an operator; inspect or replay via
-            // storm:outbox:failed. "No pending" must never read as "all delivered".
+            // dead letters first, the worse of the two signals
             if ($failedCount > 0) {
                 return HealthCheckResult::degraded(sprintf(
                     '%d dead-lettered outbox row(s), oldest %ds — inspect/replay via storm:outbox:failed%s',

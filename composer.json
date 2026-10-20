@@ -19,14 +19,13 @@
         "chronhub/storm-projector": "self.version",
         "chronhub/storm-saga": "self.version",
         "chronhub/storm-support": "self.version",
+        "chronhub/storm-text": "self.version",
         "doctrine/dbal": "^4.0",
         "psr/log": "^3.0",
         "symfony/console": "^8.1",
         "symfony/dependency-injection": "^8.1",
         "symfony/event-dispatcher": "^8.1",
         "symfony/yaml": "^8.1",
-        "symfony/http-client": "^8.1",
-        "symfony/http-client-contracts": "^3.6",
         "psr/http-client": "^1.0",
         "psr/http-message": "^2.0"
     },
@@ -36,6 +35,8 @@
         "open-telemetry/sdk": "^1.15",
         "open-telemetry/exporter-otlp": "^1.4",
         "nyholm/psr7": "^1.8",
+        "symfony/http-client": "^8.1",
+        "symfony/http-client-contracts": "^3.6",
         "symfony/process": "^8.1",
         "ext-curl": "*"
     },
@@ -58,6 +59,8 @@
         "open-telemetry/sdk": "^1.15: required only when storm.tracing is enabled.",
         "open-telemetry/exporter-otlp": "^1.4: official OTLP HTTP exporter for opt-in tracing.",
         "nyholm/psr7": "^1.8: PSR HTTP messages for opt-in tracing.",
+        "symfony/http-client": "^8.1: bounded OTLP HTTP transport for opt-in tracing.",
+        "symfony/http-client-contracts": "^3.6: HTTP client contracts of the bounded OTLP transport for opt-in tracing.",
         "ext-curl": "Required for opt-in trace export; libcurl must support asynchronous DNS."
     }
 }

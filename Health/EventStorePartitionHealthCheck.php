@@ -8,15 +8,23 @@ use Doctrine\DBAL\Connection;
 use Throwable;
 
 /**
- * Whether every category has its own partition: the DEFAULT partition read for what it holds, the
- * state partitioning early exists to prevent.
+ * Checks that every category has its own partition by reading what the `DEFAULT` partition holds,
+ * the state that partitioning early exists to prevent.
  *
- * A category that lands in `event_store_default` grows there with every other such category, and
- * once it holds rows the partition command refuses the simple split and prints a manual migration
- * under an exclusive lock instead. `Degraded` from the first row the DEFAULT partition holds, naming
- * the presence of rows and the partition command; `Ok` when it is empty. An absent `event_store`
- * is `Degraded`, core schema that `storm:install` always creates. `Down` is reserved for a failing
- * query. `Degraded`, not `Down`: the store serves, and the migration waits for an off-peak window.
+ * A category that lands in `event_store_default` grows there with every other such category. Once it
+ * holds rows, the partition command refuses the simple split and prints a manual migration under an
+ * exclusive lock instead.
+ *
+ * Its verdicts:
+ *
+ * - `Ok` when the `DEFAULT` partition is empty.
+ *
+ * - `Degraded` from its first row, naming the presence of rows and the partition command. The store
+ *   still serves, and the migration waits for an off-peak window.
+ *
+ * - `Degraded` as well for an absent `event_store`, core schema that `storm:install` always creates.
+ *
+ * - `Down` only for a failing query.
  */
 final readonly class EventStorePartitionHealthCheck implements SqlHealthCheck
 {

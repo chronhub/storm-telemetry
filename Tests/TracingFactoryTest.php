@@ -29,8 +29,8 @@ final class TracingFactoryTest extends TestCase
 
     protected function setUp(): void
     {
-        // the SDK reports every drop on its internal log, STDERR by default under the CLI; the drops
-        // below are provoked on purpose, so their reports are read here instead of leaking
+        // the SDK reports every drop on its internal log, STDERR by default under the CLI; this test
+        // provokes the drops below, so their reports are read here instead of leaking
         $this->sdkLog = new RecordingLogger;
         LoggerHolder::set($this->sdkLog);
         Logging::reset();

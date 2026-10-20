@@ -19,9 +19,10 @@ use Storm\Telemetry\Metrics\PrometheusTextRenderer;
 use Storm\Telemetry\Tests\Fixture\ThrowingMetricsCollector;
 
 /**
- * The exposition's one guarantee: a scrape never fails whole. Healthy blocks concatenate; a
- * throwing collector is dropped and surfaces as an error gauge naming the block, never as a broken
- * body and never as silence.
+ * The exposition's one guarantee: a scrape never fails whole.
+ *
+ * Healthy blocks concatenate; a throwing collector is dropped and surfaces as an error gauge naming
+ * the block, never as a broken body and never as silence.
  */
 final class MetricsExpositionTest extends TestCase
 {
@@ -64,11 +65,10 @@ final class MetricsExpositionTest extends TestCase
     #[Test]
     public function the_error_gauge_names_the_failed_block_and_counts_it_once(): void
     {
-        // the whole line, verbatim: this is what Prometheus ingests, and each piece of it answers an
-        // operator question. The label is the SHORT name, so an alert reads as the block that went
-        // dark rather than a namespace; the value is one occurrence, so a sum over the family counts
-        // failing collectors. A label reduced to a namespace, widened to the FQCN, or shifted by a
-        // character still renders a plausible gauge, which is how a broken instrument stays quiet.
+        // the whole line Prometheus ingests, verbatim, each piece answering an operator question: the
+        // short name as label, so an alert names the failed block rather than a namespace, and one
+        // occurrence as value, so a sum over the family counts failing collectors; a label cut to a
+        // namespace, widened to the FQCN or shifted by a character still renders a plausible gauge
         $text = $this->expose([new ThrowingMetricsCollector(new RuntimeException('connection refused'))]);
 
         self::assertStringContainsString(
@@ -81,7 +81,7 @@ final class MetricsExpositionTest extends TestCase
     #[Group('adversarial')]
     public function a_family_name_already_taken_is_dropped_and_counted_never_emitted_twice(): void
     {
-        // two # HELP blocks for one name invalidate the WHOLE body for the Prometheus parser; the
+        // two `# HELP` blocks for one name invalidate the whole body for the Prometheus parser; the
         // first family keeps the name, the imitator is dropped and the error gauge says so
         $text = $this->expose([
             $this->collector([MetricFamily::gauge('storm_saga_instances', 'the real one', [new MetricSample([], 1)])]),
@@ -95,7 +95,7 @@ final class MetricsExpositionTest extends TestCase
         self::assertStringContainsString("storm_saga_instances 1\n", $text);
         self::assertStringNotContainsString('storm_saga_instances 99', $text);
         self::assertStringContainsString("storm_app_own 7\n", $text, 'only the colliding family is dropped, not the collector');
-        // the whole error sample: it NAMES the guilty collector, carries the token, counts one
+        // the whole error sample: it names the guilty collector, carries the token, counts one
         self::assertMatchesRegularExpression('/storm_telemetry_collector_errors\{collector="[^"]+",error="duplicate_family"\} 1\n/', $text);
     }
 
@@ -216,8 +216,8 @@ final class MetricsExpositionTest extends TestCase
     #[Test]
     public function the_default_bound_is_five_seconds_and_a_bound_of_one_still_binds(): void
     {
-        // the default is a wired fact: autowiring fills nothing, so the shipped value IS the scrape
-        // budget every deployment gets; and 1 is the boundary the disable-check must not eat
+        // the default is a wired fact: autowiring fills nothing, so the shipped value is the scrape
+        // budget every deployment gets; and 1 is the boundary the disable check must not treat as off
         foreach ([[null, 'SET LOCAL statement_timeout = 5000'], [1, 'SET LOCAL statement_timeout = 1']] as [$timeout, $statement]) {
             $connection = $this->createMock(Connection::class);
             $connection->expects($this->once())->method('transactional')

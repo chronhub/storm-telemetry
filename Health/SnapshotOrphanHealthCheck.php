@@ -8,15 +8,25 @@ use Doctrine\DBAL\Connection;
 use Throwable;
 
 /**
- * Whether every snapshot still has its stream: an orphan is a snapshot whose stream head is gone,
- * a cache of a dead history that the read-side probe discards on load and that nothing signals
- * until then.
+ * Checks that every snapshot still has its stream.
  *
- * `Degraded` from the first orphan, naming `storm:snapshot:prune-orphans`, the
- * structural backstop; `Ok` when every snapshot has its head. An absent `snapshots` table is
- * `Degraded`, core schema that `storm:install` always creates. `Down` is reserved for a failing
- * query. A snapshot whose state lies at a version the head still holds is not read here: that is
- * `storm:snapshot:verify`, which refolds the stream to the snapshot's version and compares.
+ * An orphan is a snapshot whose stream head is gone, the cache of a dead history: the read-side probe
+ * discards it on load, and nothing signals it until then.
+ *
+ * Its verdicts:
+ *
+ * - `Ok` when every snapshot has its head.
+ *
+ * - `Degraded` from the first orphan, naming `storm:snapshot:prune-orphans`, the structural
+ *   backstop.
+ *
+ * - `Degraded` as well for an absent `snapshots` table, core schema that `storm:install` always
+ *   creates.
+ *
+ * - `Down` only for a failing query.
+ *
+ * `storm:snapshot:verify` covers a snapshot whose state lies at a version the head still holds: it
+ * refolds the stream to the snapshot's version and compares.
  */
 final readonly class SnapshotOrphanHealthCheck implements SqlHealthCheck
 {

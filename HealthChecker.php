@@ -14,34 +14,36 @@ use Symfony\Component\DependencyInjection\Attribute\AutowireIterator;
 use Throwable;
 
 /**
- * Collects every tagged `HealthCheck` service and runs them on demand. Aggregates their individual
- * results into a single overall status using the worst-wins rule, where `Ok` is below `Degraded`
- * which is below `Down`:
+ * Runs every tagged `HealthCheck` on demand and folds their results into one overall status.
  *
- * - Any `Down` makes the overall `Down`;
- * - Any `Degraded` without a `Down` makes it `Degraded`;
- * - Only all-`Ok` makes it `Ok`.
+ * The worst status wins, `Ok` below `Degraded` below `Down`:
  *
- * No-check apps return `Ok` by vacuous truth; the response is `{"status": "ok", "checks": {}}`.
+ * - Any `Down` makes the overall `Down`
+ * - Any `Degraded` without a `Down` makes it `Degraded`
+ * - Only all-`Ok` makes it `Ok`
  *
- * Backstop catch around each check, `name()` included: even if an implementation throws despite the
- * interface's must-not-throw rule, it is marked `Down` and the others keep running. Only the
- * exception class is recorded, never the message, which may carry hosts, SQL or credentials and ends
- * up in an HTTP body. The caller never sees a partial response on a single bad probe.
+ * An app with no check returns `Ok` by vacuous truth: `{"status": "ok", "checks": {}}`.
  *
- * SQL probes declare their connections through `SqlHealthCheck`. Each statement is capped at
- * 250 ms by default inside a scope that is always rolled back, preserving caller transactions.
- * The 1000 ms collection budget stops admission of further probes and caps their SQL timeout
- * to the remaining budget. It cannot interrupt PHP callbacks, connection establishment or a
- * sequence of individually bounded statements. External probes must bound their own I/O.
- * Exhausted probes report `Down`, never an unobserved `Ok`.
+ * Each check runs under a backstop catch, `name()` included. A check that throws despite the
+ * interface's must-not-throw rule is marked `Down` and the others keep running, so one bad probe
+ * never yields a partial response. Only the exception class is recorded, never its message, which may
+ * carry hosts, SQL or credentials and ends up in an HTTP body.
  *
- * Names are defended, never trusted: a blank name, a name outside the `^[a-z][a-z0-9_-]*$` grammar
- * the contract calls stable and URL-safe, or a duplicate is a wiring bug, surfaced as a `Down` entry
- * under a disambiguated key. A duplicate must never silently overwrite an earlier result, which
- * could mask a `Down` behind a later `Ok` while the overall status still said `Down`.
+ * Time is bounded at two levels:
  *
- * @see HealthCheck
+ * - An SQL probe declares its connections through `SqlHealthCheck`, and each statement is capped at
+ *   250 ms by default, inside a scope that is always rolled back so caller transactions survive.
+ *
+ * - The 1000 ms collection budget stops admitting further probes and caps their SQL timeout to what
+ *   remains. It cannot interrupt PHP callbacks, connection establishment or a sequence of
+ *   individually bounded statements, so an external probe must bound its own I/O.
+ *
+ * A probe that finds the budget exhausted reports `Down`, never an unobserved `Ok`.
+ *
+ * A blank name, a name outside the stable, URL-safe `^[a-z][a-z0-9_-]*$` grammar of the contract,
+ * or a duplicate is a wiring bug, reported as a `Down` entry under a disambiguated key. A duplicate
+ * must never overwrite an earlier result in silence, which could hide a `Down` behind a later `Ok`
+ * while the overall status still said `Down`.
  */
 final readonly class HealthChecker
 {
@@ -66,8 +68,6 @@ final readonly class HealthChecker
     }
 
     /**
-     * Run every registered check, return the aggregate.
-     *
      * @return array{status: HealthStatus, checks: array<string, HealthCheckResult>}
      */
     public function runAll(): array
@@ -95,12 +95,12 @@ final readonly class HealthChecker
                 continue;
             }
 
-            // @infection-ignore-all equivalent: trim() above already strips a trailing newline, so
+            // equivalent: trim() above already strips a trailing newline, so
             // the D flag closing the `$`-before-newline hole is stated defense, not reachable behavior
+            // @infection-ignore-all
             if (preg_match('/^[a-z][a-z0-9_-]*$/D', $name) !== 1) {
-                // the contract says stable and URL-safe: "db status", "db/primary" or a control
-                // character would be a legal JSON key but an unstable one for the dashboards,
-                // metrics and greps the name exists for; refused here, where blank already is
+                // "db status", "db/primary" or a control character is a legal JSON key, but not the
+                // stable, URL-safe name dashboards, metrics and greps need; refused like a blank one
                 $this->put($results, $check::class, HealthCheckResult::down('health check name is not URL-safe (expected ^[a-z][a-z0-9_-]*$)'));
                 $overall = HealthStatus::Down;
 
@@ -145,8 +145,9 @@ final readonly class HealthChecker
             $connections[spl_object_id($connection)] = $connection;
         }
 
-        // @infection-ignore-all equivalent: `array_shift` below takes the first connection whatever
+        // equivalent: `array_shift` below takes the first connection whatever
         // its key, so the list exists for the analyzer, not for the recursion
+        // @infection-ignore-all
         return $this->withinConnections(array_values($connections), $check, $timeoutMs);
     }
 
@@ -163,10 +164,11 @@ final readonly class HealthChecker
         $connection->beginTransaction();
         try {
             // Do not relax a stricter caller setting. Rollback restores it even after a swallowed timeout.
-            // @infection-ignore-all equivalent on what this read can return: `pg_settings` renders an
+            // equivalent on what this read can return: `pg_settings` renders an
             // integer setting as digits in its base unit, the unit in a column of its own, and a missing
             // row reads `false`; the comparison, `min()` and the `%d` below read such digits exactly as
             // their integer, and `false` as zero
+            // @infection-ignore-all
             $priorMs = (int) $connection->fetchOne("SELECT setting FROM pg_settings WHERE name = 'statement_timeout'");
             $boundMs = $priorMs > 0 ? min($priorMs, $timeoutMs) : $timeoutMs;
             $connection->executeStatement(sprintf('SET LOCAL statement_timeout = %d', $boundMs));

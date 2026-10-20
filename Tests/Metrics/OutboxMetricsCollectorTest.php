@@ -16,9 +16,10 @@ use Storm\Telemetry\Metrics\OutboxMetricsCollector;
 use Stringable;
 
 /**
- * The inbox row gauge when the statistics collector holds no row for the table. A real cluster
- * does not produce that answer on demand, so the connection is doubled and the contract of the
- * branch is what gets proven: an absent family rather than a zero, and a log line that says so.
+ * The inbox row gauge when the statistics collector holds no row for the table.
+ *
+ * A real cluster does not produce that answer on demand, so the connection is doubled and the test
+ * proves the branch's contract: an absent family rather than a zero, and a log line that says so.
  */
 final class OutboxMetricsCollectorTest extends TestCase
 {

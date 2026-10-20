@@ -11,10 +11,12 @@ use Storm\Clock\PointInTime;
 use Storm\Contracts\Clock\Clock;
 
 /**
- * The application's now minus the database's, in whole seconds, positive when the application
- * runs ahead: one read of `clock_timestamp()` bracketed by two `now()`, the database instant
- * compared to the midpoint of the bracket so the round trip cancels rather than adds; a slow
- * round trip still widens what a whole second can hide, never shifts it.
+ * The application's now minus the database's, in whole seconds, positive when the application runs
+ * ahead.
+ *
+ * One read of `clock_timestamp()` sits between two application `now()` readings, and the database
+ * instant is compared to their midpoint, so the round trip cancels rather than adds. A slow round
+ * trip still widens what a whole second can hide, but never shifts it.
  */
 final readonly class ClockSkew
 {
@@ -26,12 +28,14 @@ final readonly class ClockSkew
      */
     public static function read(Connection $connection, Clock $clock): int
     {
-        // @infection-ignore-all; equivalent: `format('U.u')` is a numeric string, and the sum below reads
+        // equivalent: `format('U.u')` is a numeric string, and the sum below reads
         // it as the very float the cast produces
+        // @infection-ignore-all
         $before = (float) $clock->now()->format('U.u');
         $database = PointInTime::fromStorage((string) $connection->fetchOne("SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US+00')"));
-        // @infection-ignore-all; equivalent: `format('U.u')` is a numeric string, and the sum below reads
+        // equivalent: `format('U.u')` is a numeric string, and the sum below reads
         // it as the very float the cast produces
+        // @infection-ignore-all
         $after = (float) $clock->now()->format('U.u');
 
         // the same holds for the database instant's cast here, an equivalent mutant the gate's

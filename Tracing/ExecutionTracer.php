@@ -66,7 +66,7 @@ final class ExecutionTracer
             return new TraceOperation($span, $span->activate());
         } catch (Throwable) {
             try {
-                // on a span never started, `->` throws inside this very `try`: the nullsafe is an
+                // on a span never started, `->` throws inside this `try`: the nullsafe is an
                 // equivalent mutant the gate's configuration leaves out, removing the call being killed
                 $span?->end();
             } catch (Throwable) {

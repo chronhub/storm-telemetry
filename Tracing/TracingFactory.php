@@ -25,11 +25,14 @@ use Symfony\Component\HttpClient\CurlHttpClient;
 
 final class TracingFactory
 {
-    /** @param Closure(): bool $safeToExport */
+    /**
+     * @param  Closure(): bool  $safeToExport
+     */
     public static function processor(string $endpoint, Closure $safeToExport, int $capacity, int $batchSize, int $budgetMs): DeferredSpanProcessor
     {
-        // @infection-ignore-all; equivalent wherever this suite runs: every runner carries curl with
+        // equivalent wherever this suite runs: every runner carries curl with
         // asynchronous DNS, so the check this call makes always passes
+        // @infection-ignore-all
         self::assertTransportAvailable();
         $budget = new ExportBudget($budgetMs);
         $http = new DeadlineHttpClient(new CurlHttpClient, $budget);

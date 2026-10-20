@@ -62,16 +62,16 @@ final class BestEffortSagaHistorySinkTest extends TestCase
             }
         };
 
-        // must NOT throw: the whole point of the decorator is that one sink's failure cannot starve a fan-out's siblings
+        // must not throw: the decorator exists so that one sink's failure cannot stop a fan-out's
+        // siblings
         new BestEffortSagaHistorySink($inner, $logger)
             ->record(new SagaHistoryEntry('transfer', 'corr-1', 'SagaStarted', []));
 
         self::assertSame('warning', $logger->level);
         self::assertSame('storm.telemetry.history_write_failed', $logger->message);
-        // the dropped row is the accepted degradation, so this context IS the trace of what was
-        // lost: which sink of a fan-out failed, which announcement it was, and why. A warning that
-        // fires with any of the three missing reads as noise and gets tuned out, which is the same
-        // silence the backstop exists to prevent.
+        // the dropped row is the accepted degradation, so this context is the trace of what was lost;
+        // a warning missing the failed sink, the announcement or the cause reads as noise and gets
+        // tuned out, the same silence the backstop exists to prevent
         self::assertSame($inner::class, $logger->context['sink']);
         self::assertSame('SagaStarted', $logger->context['event_type']);
         self::assertSame('sink down', $logger->context['error_message']);
@@ -81,8 +81,8 @@ final class BestEffortSagaHistorySinkTest extends TestCase
     #[Test]
     public function a_failing_logger_on_top_of_a_failing_sink_is_absorbed_too(): void
     {
-        // the double-failure pierce: the sink fails, then the WARNING channel fails; the wrapped
-        // logger absorbs it, nothing reaches the caller
+        // the double failure: the sink fails, then the warning channel fails; the wrapped logger
+        // absorbs it, and nothing reaches the caller
         $inner = new class() implements SagaHistorySink
         {
             public function record(SagaHistoryEntry $entry): void

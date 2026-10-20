@@ -5,29 +5,29 @@ declare(strict_types=1);
 namespace Storm\Telemetry\Metrics;
 
 use Doctrine\DBAL\Connection;
-use Storm\Support\Text\Str;
+use Storm\Text\Str;
 use Symfony\Component\DependencyInjection\Attribute\AutowireIterator;
 use Throwable;
 
 /**
  * Composes every tagged `MetricsCollector` into one text exposition, the single body the console
- * twin prints and the HTTP surface serves.
+ * command prints and the HTTP surface serves.
  *
- * Backstop catch around each collector: a scrape must never fail whole on one bad block, so a
- * throwing collector is dropped from the output and counted in `storm_telemetry_collector_errors`,
- * labeled by collector short name. Only the class is recorded, never the message, which may carry
- * hosts or SQL and ends up in an HTTP body; the healthy blocks keep reporting, and the error gauge
- * is the honest trace that a block went dark, where silence would read as "nothing to report".
+ * Each collector runs under a backstop catch, since a scrape must never fail whole on one bad block:
+ * a throwing collector is dropped from the output and counted in `storm_telemetry_collector_errors`,
+ * labeled by its short name. Only the class is recorded, never the message, which may carry hosts or
+ * SQL and ends up in an HTTP body. The healthy blocks keep reporting, and the error gauge marks the
+ * block that stopped, where silence would read as "nothing to report".
  *
- * Each collector runs inside its own short transaction carrying `SET LOCAL statement_timeout`:
- * the collectors are aggregates over live operational tables, some growing with throughput, and a
- * catch guards a throw, not a slow query; without the bound a frequent scrape against a large
- * table becomes standing load on the production database while each scrape holds a PHP worker. A
- * timeout surfaces through the same error gauge, the honest signal that a block is too expensive.
- * The bound covers this connection only; a collector reading elsewhere owns its own bound.
+ * Each collector also runs in its own short transaction carrying `SET LOCAL statement_timeout`. The
+ * collectors aggregate live operational tables, some growing with throughput, and a catch guards a
+ * throw rather than a slow query: without the bound, a frequent scrape against a large table becomes
+ * standing load on the production database while each scrape holds a PHP worker. A timeout shows
+ * through the same error gauge, the signal that a block is too expensive. The bound covers this
+ * connection only; a collector reading elsewhere owns its own.
  *
  * Two collectors emitting one family name would produce two `# HELP` blocks for one metric, which
- * the Prometheus parser rejects for the whole body; the first family keeps the name, later ones
+ * the Prometheus parser rejects for the whole body; the first family keeps the name, and later ones
  * are dropped and counted under the `duplicate_family` error token.
  */
 final readonly class MetricsExposition
@@ -56,10 +56,10 @@ final readonly class MetricsExposition
     /**
      * Every family this scrape yields, bounded and de-duplicated, ahead of any rendering.
      *
-     * Separate from `render()` because more than one surface answers from these numbers and only
-     * one of them speaks the text exposition format. What a second reader must NOT do is walk the
-     * collectors itself: the per-collector statement bound and the swallow-into-an-error-sample
-     * both live here, and a copy of them is free to drift into an ops read that hangs, or into one
+     * It is separate from `render()` because more than one surface answers from these numbers and
+     * only one of them writes the text exposition format. A second reader must call it rather than
+     * walk the collectors itself: the per-collector statement bound and the conversion of a throw into
+     * an error sample both live here, and a copy of them can drift into an ops read that hangs or one
      * that loses a whole block in silence.
      *
      * @return list<MetricFamily>
@@ -68,8 +68,9 @@ final readonly class MetricsExposition
     {
         $families = [];
         $errors = [];
-        // @infection-ignore-all equivalent: $seen is an isset()-tested key set; the values are
+        // equivalent: $seen is an isset()-tested key set; the values are
         // never read, so any value under the key behaves identically
+        // @infection-ignore-all
         $seen = [self::ERRORS_FAMILY => true];
 
         foreach ($this->collectors as $collector) {
@@ -90,7 +91,8 @@ final readonly class MetricsExposition
                     continue;
                 }
 
-                // @infection-ignore-all equivalent: an isset()-tested key set, the value is never read
+                // equivalent: an isset()-tested key set, the value is never read
+                // @infection-ignore-all
                 $seen[$family->name] = true;
                 $families[] = $family;
             }

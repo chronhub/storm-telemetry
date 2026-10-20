@@ -249,7 +249,7 @@ final class HealthCheckerTest extends TestCase
 
         self::assertSame(HealthStatus::Down, $aggregate['status']);
         self::assertSame(HealthStatus::Ok, $aggregate['checks']['db']->status);
-        // the refusal is REPORTED, keyed by class since the name it offered is unusable: a body that
+        // the refusal is reported, keyed by class since the name it offered is unusable: a body that
         // turns red without naming the offender leaves the operator to guess which probe to fix
         self::assertSame('blank health check name', (string) $aggregate['checks'][$blank::class]->message);
     }
@@ -277,7 +277,7 @@ final class HealthCheckerTest extends TestCase
     #[Test]
     public function a_third_check_sharing_one_name_and_one_class_still_lands(): void
     {
-        // the disambiguated key is `name@class`, so a THIRD duplicate of the same anonymous class
+        // the disambiguated key is `name@class`, so a third duplicate of the same anonymous class
         // collides with the disambiguation itself; the suffix loop is what keeps it. Losing it here
         // would hide a misconfiguration behind a report that silently counts one entry short
         $checks = [
@@ -292,7 +292,7 @@ final class HealthCheckerTest extends TestCase
         $this->assertCount(3, $aggregate['checks'], 'never lose an entry: three registrations, three lines');
 
         foreach (array_keys($aggregate['checks']) as $key) {
-            // the suffix EXTENDS the colliding key, never replaces it: a line whose key no longer
+            // the suffix extends the colliding key, never replaces it: a line whose key no longer
             // carries the name is an orphan, counted in the total and traceable to no registration
             $this->assertStringContainsString('dup', $key, 'every line still names the check it came from');
         }

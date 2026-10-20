@@ -7,11 +7,13 @@ namespace Storm\Telemetry\History;
 use Psr\Log\LoggerInterface;
 
 /**
- * Ships the saga history as a structured PSR-3 log record, `storm.saga.history`, leaving the operational
- * database untouched. The log driver forwards it to whatever sink is configured, such as Loki, stdout, or
- * a file. Cheapest write path; it trades queryability, since a log aggregator searches by label and time,
- * not by a high-cardinality `correlation_id`, so reconstructing one saga's timeline is poor here versus
- * `TableSagaHistorySink`.
+ * Ships the saga history as a structured PSR-3 log record, `storm.saga.history`, leaving the
+ * operational database untouched.
+ *
+ * The log driver forwards it to whatever sink is configured, such as Loki, stdout or a file. It is the
+ * cheapest write path and trades queryability for it: a log aggregator searches by label and time
+ * rather than by a high-cardinality `correlation_id`, so one saga's timeline is harder to rebuild here
+ * than from `TableSagaHistorySink`.
  *
  * @see TableSagaHistorySink  the queryable alternative
  */

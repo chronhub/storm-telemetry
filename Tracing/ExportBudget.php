@@ -7,14 +7,18 @@ namespace Storm\Telemetry\Tracing;
 use Closure;
 use InvalidArgumentException;
 
-/** A monotonic deadline shared by all HTTP attempts in one explicit drain. */
+/**
+ * A monotonic deadline shared by all HTTP attempts in one explicit drain.
+ */
 final class ExportBudget
 {
     private int $deadline = 0;
 
     private readonly Closure $now;
 
-    /** @param (Closure(): int)|null $now Monotonic time in nanoseconds. */
+    /**
+     * @param  (Closure(): int)|null  $now  monotonic time in nanoseconds
+     */
     public function __construct(private readonly int $milliseconds = 200, ?Closure $now = null)
     {
         $this->now = $now ?? static fn (): int => hrtime(true);

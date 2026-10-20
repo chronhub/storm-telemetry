@@ -21,7 +21,7 @@ final class SagaHistoryEntryTest extends TestCase
     #[Test]
     public function splits_the_two_trace_columns_out_of_the_payload(): void
     {
-        // workflowType / correlationId are columns; keeping them in the payload would duplicate them.
+        // `workflowType` and `correlationId` are columns; keeping them in the payload would duplicate them.
         $entry = SagaHistoryEntry::fromSagaEvent(new SagaTransitioned('transfer', 'corr-2', 1, 'debit', 'await_debit'));
 
         self::assertSame('transfer', $entry->workflowType);

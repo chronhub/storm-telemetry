@@ -109,8 +109,8 @@ final class PrometheusTextRendererTest extends TestCase
     #[Group('adversarial')]
     public function non_finite_values_render_as_the_spec_tokens_never_php_cast_words(): void
     {
-        // PHP casts INF and NAN to "INF" / "NAN", tokens the Prometheus parser rejects, and one
-        // rejected line kills the whole body; the format's own spellings are +Inf, -Inf and NaN
+        // PHP casts `INF` and `NAN` to "INF" and "NAN", tokens the Prometheus parser rejects, and one
+        // rejected line loses the whole body; the format's own spellings are `+Inf`, `-Inf` and `NaN`
         $text = $this->renderer->render([
             MetricFamily::gauge('storm_gauge', 'help', [
                 new MetricSample(['edge' => 'inf'], INF),

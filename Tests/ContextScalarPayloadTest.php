@@ -16,12 +16,13 @@ use Storm\Projector\Telemetry\ListenerFailureContext;
 use Storm\Projector\Telemetry\RunContext;
 
 /**
- * Structural guard, the flattening's mirror of `SagaEventScalarPayloadTest`: `StormObservability`
- * flattens every Context DTO with a blind `get_object_vars()`, so an object-typed property added to
- * any of them would land in the log context unnoticed, unserialized by design and unhandled by the
- * facade. The two `Throwable` carriers the facade extracts BY HAND are the only sanctioned
- * exceptions; a third object property must either become scalar or join the hand-handled set, and
- * this test is where that decision surfaces.
+ * Structural guard over the flattening, the counterpart of `SagaEventScalarPayloadTest`.
+ *
+ * `StormObservability` flattens every context DTO with a blind `get_object_vars()`, so an object-typed
+ * property added to any of them would land in the log context unnoticed, neither serialized nor
+ * handled by the facade. The two `Throwable` carriers the facade extracts by hand are the only
+ * sanctioned exceptions: a third object property must either become scalar or join the hand-handled
+ * set, and this test is where that decision surfaces.
  */
 final class ContextScalarPayloadTest extends TestCase
 {

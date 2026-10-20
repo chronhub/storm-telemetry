@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace Storm\Telemetry\Health;
 
 /**
- * Three-level health status used by `HealthCheck` implementations and aggregated by the
- * `HealthChecker` into the overall `/_storm/health` response. The level ordering matters for
- * aggregation:
+ * Three-level health status that `HealthCheck` implementations report and `HealthChecker` folds into
+ * the overall `/_storm/health` response.
  *
- * - Any `Down` check forces the overall to `Down`; Kubernetes will pull the pod.
- * - Any `Degraded` check without a `Down` keeps the overall `Degraded`; a 200 with a warning surface.
+ * The level order drives that aggregation:
+ *
+ * - Any `Down` check forces the overall to `Down`, and Kubernetes pulls the pod.
+ * - Any `Degraded` check without a `Down` keeps the overall `Degraded`, a 200 that surfaces a warning.
  * - All `Ok` checks make the overall `Ok`.
  *
  * @see HealthCheck

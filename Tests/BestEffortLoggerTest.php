@@ -12,9 +12,11 @@ use Storm\Telemetry\BestEffortLogger;
 use Stringable;
 
 /**
- * The no-throw boundary of every Telemetry emission: delegation is transparent when the channel is
- * healthy, and a channel failure is absorbed: never rethrown, never re-logged into the channel that
- * just failed. This is the implementation-side half of the observability ports' fail-open contract.
+ * Pins the no-throw boundary of every Telemetry emission, the implementation's half of the
+ * observability ports' fail-open contract.
+ *
+ * Delegation is transparent while the channel is healthy, and a channel failure is absorbed, never
+ * rethrown and never logged again into the channel that just failed.
  */
 final class BestEffortLoggerTest extends TestCase
 {

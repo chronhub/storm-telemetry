@@ -6,7 +6,9 @@ namespace Storm\Telemetry\Metrics;
 
 use Doctrine\DBAL\Connection;
 
-/** Observes only the gap immediately above the persisted floor, never general backlog age. */
+/**
+ * Observes only the gap immediately above the persisted floor, never general backlog age.
+ */
 final readonly class SafeHeadMetricsCollector implements MetricsCollector
 {
     public function __construct(private Connection $connection) {}

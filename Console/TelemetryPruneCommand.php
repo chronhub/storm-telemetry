@@ -6,7 +6,7 @@ namespace Storm\Telemetry\Console;
 
 use Doctrine\DBAL\Exception;
 use Override;
-use Storm\Clock\Duration;
+use Storm\Support\Console\DurationOption;
 use Storm\Support\Console\PositiveIntOption;
 use Storm\Telemetry\History\WorkflowHistoryStore;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -17,19 +17,25 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
- * Prunes `workflow_history` rows older than `--before`; the saga-history retention. `workflow_history`
- * is opt-in observability, where `SagaHistorySubscriber` appends one row per saga event; it is
- * append-only and grows with saga throughput, so it needs a retention sweep. Pruning loses only
- * observability history; the sagas' effects live in the event store.
+ * Prunes `workflow_history` rows older than `--before`, the retention of saga history.
  *
- * Batched: `DELETE WHERE recorded_at < age`, in LIMIT-capped batches; never a long lock. Idempotent.
- * Append-only, so there is no status to scope, only age.
+ * `SagaHistorySubscriber` appends one row per saga event to this opt-in, append-only table, which
+ * grows with saga throughput and so needs a retention sweep. Pruning loses only observability
+ * history; the sagas' effects live in the event store.
  *
- * `--before <30d|90d>` is required so there is no accidental prune-all; `--batch` caps each
- * statement. The other mode, `--correlation`, erases ONE correlation's rows regardless of age, every
- * generation at once: correlation ids are plaintext business keys, and when an app's carry personal
- * data this is the lever an erasure request acts on. The two modes are exclusive, an age sweep and a
- * targeted erasure never being one intention, and `--dry-run` counts under either without deleting.
+ * The sweep runs `DELETE WHERE recorded_at < age` in batches capped by `LIMIT`, never holding a long
+ * lock, and is idempotent. An append-only table has no status to scope, only an age.
+ *
+ * The two modes are exclusive, since an age sweep and a targeted erasure are never one intention:
+ *
+ * - `--before <30d|90d>` sweeps by age and is required in that mode, so no prune-all happens by
+ *   accident; `--batch` caps each statement.
+ *
+ * - `--correlation` erases one correlation's rows whatever their age, every generation at once.
+ *   Correlation ids are plaintext business keys, and when an app's ids carry personal data this is
+ *   the lever an erasure request acts on.
+ *
+ * `--dry-run` counts under either mode without deleting.
  *
  * Examples:
  *
@@ -62,7 +68,7 @@ final class TelemetryPruneCommand extends Command
     /**
      * {@inheritDoc}
      *
-     * @throws Exception on a DBAL failure of the probe / count / delete
+     * @throws Exception on a DBAL failure of the probe, the count or the delete
      */
     #[Override]
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -70,7 +76,7 @@ final class TelemetryPruneCommand extends Command
         $io = new SymfonyStyle($input, $output);
 
         if (! $this->history->installed()) {
-            // the read command's honesty, mirrored: a raw "relation does not exist" names nothing
+            // as in the read command: a raw "relation does not exist" names nothing
             $io->warning('No workflow_history table — run storm:telemetry:install. Nothing recorded, nothing to prune.');
 
             return Command::FAILURE;
@@ -105,9 +111,14 @@ final class TelemetryPruneCommand extends Command
             return Command::SUCCESS;
         }
 
-        $duration = Duration::fromString(is_string($before) ? $before : '');
+        // required unless `--correlation`, handled above: the shared option reads it as optional, and
+        // its absence is this command's own refusal
+        $duration = DurationOption::optional($input, $io, 'before');
+        if (is_int($duration)) {
+            return $duration;
+        }
         if ($duration === null) {
-            $io->error('Specify --before with an age, e.g. --before 90d (suffixes: d=days, h=hours, m=minutes), or --correlation to erase one correlation.');
+            $io->getErrorStyle()->error('Specify --before with an age such as 90d, 48h or 90m (d=days, h=hours, m=minutes), or --correlation to erase one correlation.');
 
             return Command::INVALID;
         }

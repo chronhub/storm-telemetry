@@ -17,12 +17,11 @@ use Storm\Telemetry\History\WorkflowHistoryStore;
  * The history read's own contract, over a recorded connection: what the timeline asks the database
  * for, and what the rows become on the way out.
  *
- * This file observes a live database and was deliberately OUTSIDE this scope's mutation field when
- * the scope was written; an ApiOps test that builds the store to exercise a provider brought it in,
- * and a file half in the field is a file whose escapes nobody chose. What follows finishes that
- * opening rather than arguing with it: the reads that are pure decision, the clamp, the truncation
- * probe and the hydration, all of which a stub answers as faithfully as a server. What the server
- * alone can say, that the SQL means what it reads like, stays in the integration suite.
+ * The store reads a live database, which would keep it out of this scope's mutation field, but an
+ * ApiOps test that builds it to exercise a provider brings it in, and a file half in the field is a
+ * file whose escapes nobody chose. This test covers the reads that are pure decision, the clamp, the
+ * truncation probe and the hydration, all of which a stub answers as faithfully as a server. What
+ * the server alone can say, that the SQL means what it reads like, stays in the integration suite.
  */
 final class WorkflowHistoryStoreTest extends TestCase
 {
@@ -48,7 +47,7 @@ final class WorkflowHistoryStoreTest extends TestCase
     #[Test]
     public function the_first_and_last_generations_the_column_stores_are_accepted(): void
     {
-        // the bounds are INSIDE: a guard that refused them would make the first run of every
+        // the bounds are inside: a guard that refused them would make the first run of every
         // correlation unreadable, which is the run an incident is usually about
         foreach ([1, WorkflowHistoryStore::MAX_GENERATION] as $inside) {
             $this->reads = [];
@@ -241,8 +240,10 @@ final class WorkflowHistoryStoreTest extends TestCase
     }
 
     /**
-     * One recorded read, by call order; an accessor for the same reason its sibling gateway test
-     * has one, a cleared log leaving the analyser certain it stays empty.
+     * One recorded read, by call order.
+     *
+     * It is an accessor for the reason its sibling gateway test has one: a cleared log would leave the
+     * analyzer certain the log stays empty.
      *
      * @return array{sql: string, params: array<int|string, mixed>, types: array<int|string, mixed>}
      */

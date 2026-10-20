@@ -12,15 +12,16 @@ use Storm\Saga\Event\SagaStarted;
 use Storm\Telemetry\History\SagaHistoryEntry;
 
 /**
- * The telemetry half of the no-decrypt doctrine, PINNED rather than assumed: `workflow_history`
- * stores each `Saga*` lifecycle event's public properties as its payload, so the ONLY way a domain
- * event's personal data can ever reach the history table is a lifecycle event growing an
- * object-typed property that smuggles it in. This suite forbids exactly that, structurally: every
- * public property of every `Saga*` event is a builtin scalar or array carrying state names, keys,
- * reasons and counts, never an object. A new lifecycle event carrying `public DomainEvent $event`
- * turns this red before its first row is written.
+ * Pins the telemetry half of the no-decrypt doctrine rather than assuming it.
  *
- * Discovery is from the FILESYSTEM, anchored on a known event, the SchemaCompleteness pattern: a
+ * `workflow_history` stores each `Saga*` lifecycle event's public properties as its payload, so the
+ * only way a domain event's personal data can ever reach the history table is a lifecycle event
+ * growing an object-typed property that carries it in. This suite forbids exactly that,
+ * structurally: every public property of every `Saga*` event is a builtin scalar or array carrying
+ * state names, keys, reasons and counts, never an object. A new lifecycle event carrying
+ * `public DomainEvent $event` turns this red before its first row is written.
+ *
+ * Discovery reads the filesystem, anchored on a known event, the SchemaCompleteness pattern, so a
  * new event file is seen without anyone remembering to list it.
  *
  * @see SagaHistoryEntry::fromSagaEvent the payload projection this pins

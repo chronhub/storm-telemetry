@@ -6,9 +6,10 @@ namespace Storm\Telemetry\Metrics;
 
 /**
  * Renders metric families to the Prometheus text exposition format, version 0.0.4: per family one
- * `# HELP` and one `# TYPE` line, then one `name{label="value"} 123` line per sample. Hand-written
- * on purpose: the format is a handful of lines and emitting it directly keeps the package free of
- * a client-library dependency.
+ * `# HELP` and one `# TYPE` line, then one `name{label="value"} 123` line per sample.
+ *
+ * It is written by hand: the format is a handful of lines, and emitting it directly keeps the
+ * package free of a client-library dependency.
  *
  * A family with no samples is skipped whole, so an empty block never emits orphan headers. Label
  * values are escaped per the spec:
@@ -66,8 +67,8 @@ final readonly class PrometheusTextRenderer
 
     private function value(int|float $value): string
     {
-        // the format spells non-finite values as Go tokens; PHP's INF and NAN casts would emit
-        // words the parser rejects, killing the whole body over one sample
+        // the format spells non-finite values as Go tokens; PHP's `INF` and `NAN` casts would emit
+        // words the parser rejects, losing the whole body over one sample
         return match (true) {
             is_float($value) && is_nan($value) => 'NaN',
             is_float($value) && is_infinite($value) => $value === INF ? '+Inf' : '-Inf',

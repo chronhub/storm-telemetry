@@ -49,7 +49,9 @@ final class SqlHealthCheckConnectionsTest extends TestCase
     }
 
     /**
-     * @return iterable<string, array{Closure(Connection, Clock<PointInTime>, ProjectionCatalog): SqlHealthCheck}>
+     * @return iterable<string, array{
+     *     Closure(Connection, Clock<PointInTime>, ProjectionCatalog): SqlHealthCheck,
+     * }>
      */
     public static function singleConnectionProbes(): iterable
     {

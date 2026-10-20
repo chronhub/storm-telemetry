@@ -9,10 +9,11 @@ use InvalidArgumentException;
 use function sprintf;
 
 /**
- * A `generation` filter outside what the `workflow_history.generation` column can hold: refused by
- * the store before the query, where the driver would otherwise answer an out-of-range error quoting
- * the SQL to the caller. The bound lives beside the column it describes, so the console and HTTP
- * surfaces inherit one refusal without coordinating a copy of it.
+ * A `generation` filter outside what the `workflow_history.generation` column can hold.
+ *
+ * The store refuses it before the query, where the driver would otherwise answer an out-of-range
+ * error quoting the SQL to the caller. The bound lives beside the column it describes, so the console
+ * and HTTP surfaces inherit one refusal without each keeping a copy.
  */
 final class GenerationOutOfRange extends InvalidArgumentException
 {

@@ -18,12 +18,14 @@ use Storm\Saga\Event\SagaCompensated;
 use Storm\Saga\Event\SagaCompensationSkipped;
 use Storm\Saga\Event\SagaCompleted;
 use Storm\Saga\Event\SagaFamilyCrossingReplayed;
+use Storm\Saga\Event\SagaFamilyCrossingUnresolved;
 use Storm\Saga\Event\SagaFamilyMemberConcluded;
 use Storm\Saga\Event\SagaGloballyTimedOut;
 use Storm\Saga\Event\SagaHalted;
 use Storm\Saga\Event\SagaJoinArmArrived;
 use Storm\Saga\Event\SagaJoinCompleted;
 use Storm\Saga\Event\SagaJoinFailed;
+use Storm\Saga\Event\SagaOutcomeDeferred;
 use Storm\Saga\Event\SagaOutcomeDiscarded;
 use Storm\Saga\Event\SagaPaused;
 use Storm\Saga\Event\SagaRaceSettled;
@@ -39,20 +41,26 @@ use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
 use Throwable;
 
 /**
- * Adapts the engine's in-process `Saga*` domain events into `SagaHistoryEntry` records and forwards
- * them to the configured `SagaHistorySink`. The destination is the sink's choice, not hard-coded here:
- * a queryable table, a log stream, an async publish, or several via a fan-out. One `#[AsEventListener]`
- * per `Saga*` event; the completeness guard enforces that every event keeps a handler.
+ * Turns the engine's in-process `Saga*` events into `SagaHistoryEntry` records and forwards them to
+ * the configured `SagaHistorySink`.
  *
- * Cardinal rule: the observer must not break the observed. The engine dispatches these after the saga
- * commits, in `Step::finish`'s loop which has no isolation of its own, so a failure here must degrade to
- * a logged drop, never a thrown exception re-entering an already-committed saga; otherwise a retrying
- * bus would redeliver it, the timer runner would abort the batch, and the outbox relay's post-commit
- * settle would skip a compensation. A logging concern must never suppress a business rollback. This
- * top-level catch is the hard backstop holding whatever sink is wired, and its own fallback logger is
- * `BestEffortLogger`-wrapped, so the backstop cannot be pierced by the very channel it reports through;
- * a fan-out additionally isolates each sink via `BestEffortSagaHistorySink`. The event store stays the
- * source of truth; this trail may drop or duplicate rows.
+ * The sink chooses the destination: a queryable table, a log stream, an async publish, or several
+ * through a fan-out. Each `Saga*` event has its own `#[AsEventListener]`, and the completeness guard
+ * enforces a handler for every event.
+ *
+ * The observer must not break the observed. The engine dispatches these events after the saga
+ * commits, in the loop of `Step::finish` that has no isolation of its own, so a failure here must
+ * end as a logged drop. A thrown exception would re-enter the committed saga:
+ *
+ * - A retrying bus would redeliver it.
+ * - The timer runner would abort its batch.
+ * - The outbox relay's post-commit settle would skip a compensation.
+ *
+ * A logging concern must never suppress a business rollback. The catch in `record()` is the backstop
+ * for whatever sink is wired, and its fallback logger is wrapped in `BestEffortLogger`, so the
+ * channel it reports through cannot break it; a fan-out also isolates each sink through
+ * `BestEffortSagaHistorySink`. The event store stays the source of truth, and this trail may drop or
+ * duplicate rows.
  */
 final readonly class SagaHistorySubscriber
 {
@@ -66,9 +74,6 @@ final readonly class SagaHistorySubscriber
         LoggerInterface $logger,
         private Clock $clock,
     ) {
-        // the hard backstop must not be pierceable by its own fallback channel: the warning below
-        // fires inside the engine's post-commit dispatch, where a throwing logger would re-enter a
-        // committed saga, causing redelivery, an aborted timer batch, or skipped compensation
         $this->logger = new BestEffortLogger($logger);
     }
 
@@ -163,6 +168,12 @@ final readonly class SagaHistorySubscriber
     }
 
     #[AsEventListener]
+    public function onSagaOutcomeDeferred(SagaOutcomeDeferred $event): void
+    {
+        $this->record($event);
+    }
+
+    #[AsEventListener]
     public function onSagaRetried(SagaRetried $event): void
     {
         $this->record($event);
@@ -217,6 +228,12 @@ final readonly class SagaHistorySubscriber
     }
 
     #[AsEventListener]
+    public function onSagaFamilyCrossingUnresolved(SagaFamilyCrossingUnresolved $event): void
+    {
+        $this->record($event);
+    }
+
+    #[AsEventListener]
     public function onSagaPaused(SagaPaused $event): void
     {
         $this->record($event);
@@ -228,25 +245,19 @@ final readonly class SagaHistorySubscriber
         $this->record($event);
     }
 
-    /**
-     * Normalize and forward. Best-effort: any failure is caught and logged, never propagated back into the
-     * engine's post-commit dispatch, per the cardinal rule that the observer must not break the observed.
-     */
     private function record(object $event): void
     {
         try {
-            // identity and occurrence time are minted HERE, before any fan-out or async hop: the
-            // eventId survives transport retries, since the same id means the same announcement
-            // redelivered, and occurredAt is the announce time; on the async strategy the table's
-            // recorded_at is the CONSUMPTION time, which orders arrival, not the saga's life
+            // minted before any fan-out or async hop: a redelivered announcement keeps its event id,
+            // and `occurredAt` is the announce time; an async table's `recorded_at` is consumption
+            // time, which orders arrival rather than the saga's life
             $this->sink->record(SagaHistoryEntry::fromSagaEvent(
                 $event,
                 bin2hex(random_bytes(16)),
                 $this->clock->now()->toString(),
             ));
         } catch (Throwable $e) {
-            // A dropped audit row is the acceptable degradation; a thrown exception here is not. It would
-            // break a saga that already committed. Log it under the exception key for a Monolog backtrace.
+            // a dropped audit row is the accepted degradation; `exception` gives Monolog the backtrace
             $this->logger->warning('storm.telemetry.history_write_failed', [
                 'event' => $event::class,
                 'error_message' => $e->getMessage(),

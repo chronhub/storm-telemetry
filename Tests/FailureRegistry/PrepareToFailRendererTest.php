@@ -118,8 +118,10 @@ final class PrepareToFailRendererTest extends TestCase
     }
 
     /**
-     * A registry of one class whose four stages are holes naming the issue: the shipped registry no longer holds
-     * a hole once every class is disposed, so the link rendering is proven on a planted one.
+     * A registry of one class whose four stages are holes naming the issue.
+     *
+     * The shipped registry no longer holds a hole once every class is disposed, so the link rendering
+     * is proven on a planted one.
      */
     private function registryWithOneHole(int $issue, string $title = 'Example'): string
     {

@@ -11,20 +11,21 @@ use Throwable;
  * Liveness of the event outbox relay itself, read from its heartbeat rather than from its backlog.
  *
  * `outbox_liveness` reads the age of the oldest pending row, so on a system with nothing to relay it
- * answers Ok whether the relay is alive or dead; a relay that died on a quiet night is discovered by
+ * answers `Ok` whether the relay is alive or dead; a relay that died on a quiet night shows only in
  * the first morning's backlog. This check reads `es_outbox_relay`, the row every drain upserts, and
  * degrades on silence:
  *
  * - No heartbeat at all: `Degraded`, the relay has never run against this database.
- * - The freshest heartbeat older than the threshold: `Degraded`, the relay stopped or is wedged.
+ * - The freshest heartbeat older than the threshold: `Degraded`, the relay stopped or is stuck.
  * - Otherwise `Ok`, carrying the age.
  *
  * The threshold is a multiple of the relay's poll, never its equal: a daemon at `--sleep=800` beats
  * about once a second when idle, a scheduler one-shot once per schedule, and the default of 300
  * seconds covers a schedule up to a few minutes with room for a recycle.
  *
- * `Degraded`, not `Down`: events are durably stored and the writers keep writing; a warning surface.
- * `Down` is reserved for a failing query. An absent table is an incomplete install, `Degraded` too.
+ * Silence is `Degraded` rather than `Down`, since events are durably stored and the writers keep
+ * writing; `Down` is kept for a failing query. An absent table is an incomplete install, `Degraded`
+ * too.
  */
 final readonly class OutboxRelayLivenessHealthCheck implements SqlHealthCheck
 {

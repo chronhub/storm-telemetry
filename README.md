@@ -76,8 +76,23 @@ compilation with an explicit error. Disabled tracing does not load SDK-dependent
 
 `storm.tracing.provider` is a dedicated SDK provider, available for explicit injection. It does
 not replace the application's global provider. Enabling tracing instruments Storm's buses, handler
-invocations, inbox attempts, append attempts and event-store outbox publishing. HTTP ingress, saga
-steps and projection batches require separate instrumentation.
+invocations, inbox attempts, append attempts, event-store outbox publishing and persistent
+projection batches, plus saga steps, timers and command publishing when the Saga module is enabled;
+[Execution spans](#execution-spans) lists each boundary. HTTP ingress requires separate
+instrumentation: for a request, the Symfony lifecycle opens no span and only drains the queue at
+kernel termination.
+
+Execution tracing spans two packages. Telemetry owns the tracer and the export machinery,
+`ExecutionTracer`, `DeferredSpanProcessor`, `TracingFactory` and `OpenTelemetryContext`; the tracer
+adds the error attributes and `storm.links.omitted`. The middleware, wrappers and decorators that
+open the spans live in the bundle, under `src/Symfony/Tracing`: Messenger middleware, wrappers of the
+handler locator and of Story's batch consumer, decorators of the Chronicler and Saga ports, and the
+projection runner's observer. They set each span's name, as [Execution spans](#execution-spans)
+lists it, and its domain attributes. The bundle is the one layer allowed to depend on all of these
+modules. `TracingServices::register()`
+loads them from the bundle extension when `storm.tracing.enabled` is true, and `TraceHandlersPass`
+attaches the handler, batch-consumer and projection-runner instrumentation during container
+compilation.
 
 Ending a sampled span only appends its snapshot to a bounded queue. A full queue drops incoming
 spans. The processor exports only on an explicit `forceFlush()` call; it checks every configured

@@ -21,31 +21,31 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
- * One saga's recorded life, oldest first: what `storm:saga:inspect` cannot show, because the
- * instance row holds the CURRENT state and this holds every announcement that led to it.
+ * Prints one saga's recorded life, oldest first: the instance row `storm:saga:inspect` reads holds
+ * the current state, and this command shows every announcement that led to it.
  *
- * Reads `workflow_history`, which is opt-in three times over:
+ * It reads `workflow_history`, which takes three opt-ins:
  *
- * - The Telemetry package installed;
- * - `storm:telemetry:install` run;
- * - The app's `SagaHistorySink` alias pointed at the table sink.
+ * - The Telemetry package installed
+ * - `storm:telemetry:install` run
+ * - The app's `SagaHistorySink` alias pointed at the table sink
  *
- * Each of those has its own empty answer, and the command says which one it hit rather than printing
- * an empty list: "the recorder was off" and "this saga announced nothing" are opposite conclusions.
+ * Each has its own empty answer, and the command names the one it hit rather than printing an empty
+ * list: "the recorder was off" and "this saga announced nothing" are opposite conclusions.
  *
- * Ordered by the saga's OWN announce time, not by arrival, so a timeline stays in the order the saga
- * was lived even under the async publishing sink. Redeliveries are deduplicated by the store before
- * the window, so a row never repeats and never eats the limit.
+ * Records follow the saga's own announce time rather than their arrival, so the timeline keeps the
+ * order the saga lived even under the async publishing sink. The store deduplicates redeliveries
+ * before the window, so a row never repeats and never uses up the limit.
  *
- * `--generation` narrows to ONE run of a reused correlation; without it the timeline aggregates
- * every run the correlation ever had, which on `#[Workflow(reuse: Allow)]` is several sagas sharing
- * a business key; each record carries its `generation` so the runs stay tellable apart.
+ * `--generation` narrows to one run of a reused correlation. Without it the timeline aggregates every
+ * run of the correlation, which under `#[Workflow(reuse: Allow)]` means several sagas sharing a
+ * business key; each record carries its `generation` to tell the runs apart.
  *
- * Passing the workflow type is worth it on a large table: it lets the read ride the
- * `(workflow_type, correlation_id, occurred_at, id)` index, which a correlation alone cannot use.
+ * Passing the workflow type pays off on a large table: the read can then use the
+ * `(workflow_type, correlation_id, occurred_at, id)` index, which a correlation alone cannot.
  *
- * Scriptable: `--json` prints the machine-readable timeline with its availability, and an empty
- * timeline exits FAILURE, the same contract as `storm:saga:inspect` and `storm:saga:list`.
+ * `--json` prints the machine-readable timeline with its availability, and an empty timeline exits
+ * with `Command::FAILURE`, the contract of `storm:saga:inspect` and `storm:saga:list`.
  *
  * Examples:
  *
@@ -80,7 +80,7 @@ final class TelemetryHistoryCommand extends Command
     /**
      * {@inheritDoc}
      *
-     * @throws JsonException on a stored-payload decode failure, or encoding the --json output
+     * @throws JsonException on a stored-payload decode failure, or encoding the `--json` output
      * @throws Exception on a DBAL read failure
      */
     #[Override]
@@ -130,8 +130,8 @@ final class TelemetryHistoryCommand extends Command
         }
 
         if ($timeline->records === []) {
-            // the empty answer's REASON, never a bare "nothing found": an operator told "no history"
-            // concludes the engine announced nothing, when the recorder is usually simply off
+            // the empty answer's reason, never a bare "nothing found": an operator told "no history"
+            // concludes the engine announced nothing, when the recorder is usually off
             match ($timeline->availability) {
                 HistoryAvailability::NotInstalled => $io->getErrorStyle()->warning('No workflow_history table — run storm:telemetry:install. This says nothing about the saga.'),
                 HistoryAvailability::EmptyTable => $io->getErrorStyle()->warning('The workflow_history table is empty — nothing has landed yet: a fresh install, a full prune, or no recording sink wired (the default is the null one; check the SagaHistorySink alias). The rows cannot tell which.'),
@@ -149,7 +149,7 @@ final class TelemetryHistoryCommand extends Command
                 $r->generation === 0 ? '—' : (string) $r->generation,
                 $r->eventType,
                 // arrival is shown only when it disagrees with the saga's own clock: under the async
-                // sink that gap IS the observability lag, and it is the reason both times are stored
+                // sink that gap is the observability lag, and it is the reason both times are stored
                 $r->recordedAt === $r->occurredAt ? '=' : $r->recordedAt,
                 self::payload($r),
             ], $timeline->records),

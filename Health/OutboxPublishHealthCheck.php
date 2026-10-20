@@ -8,15 +8,17 @@ use Doctrine\DBAL\Connection;
 use Throwable;
 
 /**
- * Whether the relays can still publish: the pending rows of both outboxes that failed a publish and
- * are being retried, the trace a broker outage leaves while the backlog checks still read Ok.
+ * Checks that the relays can still publish by reading the pending rows of both outboxes that failed a
+ * publish and are retried, the trace a broker outage leaves while the backlog checks still read `Ok`.
  *
  * A failed publish leaves the row it withheld with an attempt spent and its `last_error` recorded, on
- * `es_outbox` for the event relay and on `workflow_outbox` for the saga relay; the backlog checks read
- * the age of the oldest pending row and go Degraded only past their threshold, the accepted blind
- * window, and the attempt budget never dead-letters a row an outage withheld. This check reads the
- * attempts instead: `Degraded` from the first pending row that spent one, naming how many on each
- * relay and the last error recorded, so an operator reads the outage and restores the broker.
+ * `es_outbox` for the event relay and on `workflow_outbox` for the saga relay. The backlog checks read
+ * the age of the oldest pending row and turn `Degraded` only past their threshold, an accepted blind
+ * window, and the attempt budget never dead-letters a row an outage withheld.
+ *
+ * This check reads the attempts instead: `Degraded` from the first pending row that spent one, naming
+ * the count on each relay and the last error recorded, so an operator reads the outage and restores
+ * the broker.
  *
  * The saga relay spends its attempt when it claims, before it publishes, so a spent attempt alone
  * does not name a failure there:
@@ -25,10 +27,9 @@ use Throwable;
  * - A lapsed claim with no error recorded is a drain lost before its outcome, or one that outlasted
  *   its lease: counted apart, and never named a failed dispatch.
  *
- * Dead letters are the liveness checks' business; this one reads what is still being retried. An
- * absent `workflow_outbox` is `Ok` with its reason, the saga module being opt-in; an absent
- * `es_outbox` is `Degraded`, core schema that `storm:install` always creates. `Down` is reserved
- * for a failing query.
+ * Dead letters belong to the liveness checks; this one reads what is still being retried. An absent
+ * `workflow_outbox` is `Ok` with its reason, the saga module being opt-in, and an absent `es_outbox`
+ * is `Degraded`, core schema that `storm:install` always creates. `Down` is kept for a failing query.
  */
 final readonly class OutboxPublishHealthCheck implements SqlHealthCheck
 {
@@ -108,9 +109,11 @@ final readonly class OutboxPublishHealthCheck implements SqlHealthCheck
     }
 
     /**
-     * The saga commands whose claim is over, a claim in flight left out: `count` those a failed
-     * dispatch left an error on, `lapsed` those whose claim ended with no outcome recorded. The last
-     * error is read among the former alone, so a lapsed claim never hides it.
+     * Reads the saga commands whose claim is over, leaving a claim in flight out.
+     *
+     * `count` holds those a failed dispatch left an error on, and `lapsed` those whose claim ended with
+     * no outcome recorded. The last error is read among the former alone, so a lapsed claim never
+     * hides it.
      *
      * @return array{count: int, lapsed: int, error: string|null}
      */

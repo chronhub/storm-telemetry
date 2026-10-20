@@ -6,7 +6,8 @@ namespace Storm\Telemetry\Health;
 
 /**
  * The result of one `HealthCheck::check()` call: a status and an optional human-readable detail.
- * Persists no state itself; each invocation builds a fresh result.
+ *
+ * It persists no state; each invocation builds a fresh result.
  *
  * @see HealthCheck::check()
  */

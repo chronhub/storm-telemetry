@@ -7,9 +7,10 @@ namespace Storm\Telemetry\Metrics;
 use Doctrine\DBAL\Connection;
 
 /**
- * The snapshot block: how many snapshots the store retains with their stream head, and how many
- * it holds for a stream that is gone, the orphans nothing else signals. Reports nothing when the
- * table is not installed rather than failing the scrape.
+ * The snapshot block: how many snapshots the store retains with their stream head, and how many it
+ * holds for a stream that is gone, the orphans nothing else signals.
+ *
+ * It reports nothing when the table is not installed rather than failing the scrape.
  */
 final readonly class SnapshotMetricsCollector implements MetricsCollector
 {
@@ -17,9 +18,6 @@ final readonly class SnapshotMetricsCollector implements MetricsCollector
         private Connection $connection,
     ) {}
 
-    /**
-     * @return list<MetricFamily>
-     */
     public function families(): array
     {
         if (! $this->connection->createSchemaManager()->tablesExist(['snapshots'])) {

@@ -11,14 +11,15 @@ use Storm\Telemetry\Schema\TelemetrySchemaCatalog;
 use Storm\Telemetry\Schema\WorkflowHistorySchema;
 
 /**
- * Pins the two lists that can silently drift apart: the `*Schema` classes the package declares, and
- * the catalog `storm:telemetry:install` verifies against the live PostgreSQL catalogs. The schema
- * classes are discovered from the FILESYSTEM, so a new one is seen without anyone remembering to look.
+ * Pins the two lists that can drift apart in silence: the `*Schema` classes the package declares, and
+ * the catalog `storm:telemetry:install` verifies against the live PostgreSQL catalogs.
  *
- * The twin of `SagaSchemaCompletenessTest` and the Ledger's `SchemaCompletenessTest`. Without the pin,
- * a schema class gaining a table, a column, a constraint or an index that {@see TelemetrySchemaCatalog}
- * never learns about fails no test: `storm:telemetry:install` then blesses a pre-existing table missing
- * it, and the failure surfaces only in the sink's INSERT, on a path the subscriber's backstop swallows.
+ * The schema classes are discovered from the filesystem, so a new one is seen without anyone
+ * remembering to look. This test is the counterpart of `SagaSchemaCompletenessTest` and the Ledger's
+ * `SchemaCompletenessTest`. Without the pin, a schema class gaining a table, a column, a constraint or
+ * an index that {@see TelemetrySchemaCatalog} never learns about fails no test:
+ * `storm:telemetry:install` then accepts a pre-existing table missing it, and the failure surfaces
+ * only in the sink's `INSERT`, on a path the subscriber's backstop swallows.
  */
 final class TelemetrySchemaCompletenessTest extends TestCase
 {
@@ -40,10 +41,9 @@ final class TelemetrySchemaCompletenessTest extends TestCase
     #[Test]
     public function catalog_columns_match_the_declared_ddl_exactly(): void
     {
-        // Tables and their names are pinned above; this pins the COLUMN lists. Without it, a Schema
-        // class gaining a column while TelemetrySchemaCatalog::COLUMNS stays behind fails no test,
-        // and the probe then blesses a pre-existing table missing that column: an install reported
-        // verified, an INSERT failing later, on exactly the columns the catalog exists to defend.
+        // the tables are pinned above, the column lists here: without this, a schema class gaining a
+        // column while `TelemetrySchemaCatalog::COLUMNS` stays behind fails no test, and the probe
+        // accepts a table missing it, an install reported verified and an `INSERT` failing later
         $declared = $this->declaredColumnsByTable();
 
         foreach (TelemetrySchemaCatalog::COLUMNS as $table => $columns) {
@@ -95,12 +95,13 @@ final class TelemetrySchemaCompletenessTest extends TestCase
 
     /**
      * Every verified constraint is still declared, and a declared value appears verbatim in the
-     * rendered DDL: the probe compares it against `pg_get_constraintdef`, a complete definition such
-     * as `PRIMARY KEY (id)` by equality and a fragment by containment, so a value the DDL no longer
-     * contains means either the catalog drifted or the value was never deparse-stable to begin with.
-     * The parameter carries the catalog's declared contract shape rather than the constant itself,
-     * so the non-null branch is read against that type and not against whichever values happen to
-     * sit in the list today.
+     * rendered DDL.
+     *
+     * The probe compares the value against `pg_get_constraintdef`, a complete definition such as
+     * `PRIMARY KEY (id)` by equality and a fragment by containment, so a value the DDL no longer
+     * contains means the catalog drifted or the value was never deparse-stable. The parameter carries
+     * the catalog's declared contract shape rather than the constant itself, so the non-null branch is
+     * read against that type rather than against the values the list happens to hold.
      *
      * @param  array<string, array<string, string|null>>  $constraintsByTable
      * @param  array<string, string>  $ddl
@@ -120,7 +121,7 @@ final class TelemetrySchemaCompletenessTest extends TestCase
     #[Test]
     public function every_declared_constraint_and_index_is_verified_by_the_catalog(): void
     {
-        // the OTHER direction, the one the test above cannot see: a schema class gaining a CHECK or
+        // the other direction, the one the test above cannot see: a schema class gaining a `CHECK` or
         // an index that the catalog never learns about is a shape nobody proves, and the install
         // still reports verified over a pre-existing table that may not carry it at all
         $verified = [];
@@ -194,7 +195,7 @@ final class TelemetrySchemaCompletenessTest extends TestCase
     }
 
     /**
-     * Column names per table, parsed from every `up()` CREATE TABLE body.
+     * Column names per table, parsed from every `up()` `CREATE TABLE` body.
      *
      * @return array<string, list<string>>
      */
@@ -213,10 +214,11 @@ final class TelemetrySchemaCompletenessTest extends TestCase
     }
 
     /**
-     * The column names of one CREATE TABLE statement, read line by line: the house DDL format puts
-     * one column per line, `CONSTRAINT` and `--` comment lines aside, and closes the body on its own
-     * `)` line. Deliberately NOT an SQL parser: this suite pins conventions, and a statement this
-     * parse misreads is a statement breaking the format every schema follows.
+     * The column names of one `CREATE TABLE` statement, read line by line.
+     *
+     * The house DDL format puts one column per line, `CONSTRAINT` and `--` comment lines aside, and
+     * closes the body on its own `)` line. The suite pins conventions rather than parsing SQL, so a
+     * statement this read misreads is a statement breaking the format every schema follows.
      *
      * @return list<string>
      */

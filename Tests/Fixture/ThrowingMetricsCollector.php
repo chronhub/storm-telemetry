@@ -9,8 +9,8 @@ use Throwable;
 
 /**
  * A collector whose block always fails, carrying a stable class name so the error gauge's label can
- * be asserted verbatim; an anonymous class names itself after the file and a counter, which is the
- * one thing that label must never become.
+ * be asserted verbatim; an anonymous class would name itself after the file and a counter, a label
+ * the gauge must never carry.
  */
 final readonly class ThrowingMetricsCollector implements MetricsCollector
 {

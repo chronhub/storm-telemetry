@@ -11,25 +11,35 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Throwable;
 
 /**
- * Whether every running projection's runner is still alive: a runner renews its lease every cycle,
- * idle cycles included, so a `running` projection whose lease has expired is a runner that stopped
- * without exiting or died without releasing, a freeze the lag cannot see, since the safe-head floor
- * is ratcheted by the runner's own tick.
+ * Checks that every running projection's runner is still alive.
  *
- * `Degraded` from the first expired lease under a running status, naming the projection, the age of
- * its last heartbeat and the recovery, the frozen process recycled first, since a lock it holds
- * inside a transaction blocks any takeover, then a second runner claiming the expired lease; `Ok` naming how
- * many run with a live lease, or that nothing runs. An absent `projections` table is `Degraded`,
- * core schema `storm:install` always creates. `Down` is reserved for a failing read. A projection
- * paused, idle or failed holds no lease and is not read here: `storm:projection:status` is its verb.
+ * A runner renews its lease every cycle, idle cycles included, so a `running` projection whose lease
+ * expired has a runner that stopped without exiting or died without releasing. The lag cannot see
+ * that freeze, since the runner's own tick ratchets the safe-head floor.
+ *
+ * Its verdicts:
+ *
+ * - `Degraded` from the first expired lease under a running status, naming the projection, the age
+ *   of its last heartbeat and the recovery: recycle the frozen process first, since a lock it holds
+ *   inside a transaction blocks any takeover, then let a second runner claim the expired lease.
+ *
+ * - `Ok` naming how many run with a live lease, or that nothing runs.
+ *
+ * - `Degraded` for an absent `projections` table, core schema that `storm:install` always creates.
+ *
+ * - `Down` only for a failing read.
+ *
+ * A paused, idle or failed projection holds no lease and is left to `storm:projection:status`.
  */
 final readonly class ProjectionRunnerLivenessHealthCheck implements SqlHealthCheck
 {
     /**
-     * Lazy on purpose: the catalog stands on the projector's homes, the event store and its cipher
-     * key behind them, and a kernel that only describes the health checks by name, the ApiOps
-     * describe surface, must never boot that graph; it materializes at the first `check()`.
-     * A manually composed SQL catalog must supply its connection to participate in SQL bounds.
+     * Takes the catalog lazily, materialized at the first `check()`.
+     *
+     * The catalog depends on the projector's homes, with the event store and its cipher key behind
+     * them, and a kernel that only describes the health checks by name, the ApiOps describe surface,
+     * must never boot that graph. A manually composed SQL catalog must supply its connection to take
+     * part in the SQL bounds.
      */
     public function __construct(
         #[Autowire(lazy: true)]
@@ -73,7 +83,7 @@ final readonly class ProjectionRunnerLivenessHealthCheck implements SqlHealthChe
             }
         } catch (Throwable $e) {
             // an absent table surfaces as a driver exception: read the class, never the message; any
-            // other failure, the lease reads included, is Down, never an escape into the HTTP body
+            // other failure, the lease reads included, is `Down`, never an escape into the HTTP body
             return str_contains($e::class, 'TableNotFound')
                 ? HealthCheckResult::degraded('projections is absent — storm:install has not run against this database')
                 : HealthCheckResult::down('projection runner liveness read failed ('.$e::class.')');

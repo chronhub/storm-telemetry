@@ -5,19 +5,19 @@ declare(strict_types=1);
 namespace Storm\Telemetry\History;
 
 /**
- * One saga's recorded life: the rows, whether the cap cut them short, and, when there are none, why
+ * One saga's recorded life: the rows, whether the cap cut them short, and why there are none when
  * there are none.
  *
- * The `availability` is the reason this is an envelope rather than a bare list. An empty timeline has
+ * The `availability` is why this is an envelope rather than a bare list, since an empty timeline has
  * three very different meanings:
  *
- * - Never installed;
- * - Nothing wired to record;
- * - Genuinely nothing announced for this correlation.
+ * - Never installed
+ * - Nothing wired to record
+ * - Nothing announced for this correlation
  *
- * A reader that returns `[]` for all three tells an operator the engine stayed silent when the truth
- * is that the recorder was off. Truncation is announced for the same reason it is on the saga
- * listing: a capped answer that reads as a complete one is the lie an operator cannot recover from.
+ * A reader that returns `[]` for all three tells an operator the engine stayed silent when the
+ * recorder was off. Truncation is announced for the reason the saga listing announces it: a capped
+ * answer that reads as a complete one is a lie the operator cannot recover from.
  *
  * @see WorkflowHistoryStore::read() the producer
  */

@@ -8,24 +8,29 @@ use Doctrine\DBAL\Connection;
 use Throwable;
 
 /**
- * Liveness AND delivery honesty of the sagas' command outbox, the twin of `OutboxLivenessHealthCheck`
- * over `workflow_outbox`. Two signals, worst first:
+ * Checks that the sagas' command outbox, `workflow_outbox`, is alive and reports its deliveries
+ * honestly, as `OutboxLivenessHealthCheck` does for the event outbox.
  *
- * - Dead letters: `failed` rows are commands no relay will send again; they wait for an operator
- *   to read `storm:saga:inspect` and decide on `storm:saga:redrive`, and they vanish from every
- *   pending-backlog metric at the moment they most need eyes. Any `failed` row is `Degraded`.
+ * Two signals, worst first:
  *
- * - Relay lag: the age of the oldest still-`pending` row, `clock_timestamp() - min(created_at)`.
- *   Nothing else says that `storm:saga:relay` stopped, that no worker is scheduled, or that the
- *   command bus is refusing; a saga whose command sits here does not advance.
+ * - Dead letters: `failed` rows are commands no relay sends again. They wait for an operator to read
+ *   `storm:saga:inspect` and decide on `storm:saga:redrive`, and they vanish from every
+ *   pending-backlog metric when they most need attention. Any `failed` row is `Degraded`.
  *
- * `published` rows are the command trail the settle pairs against and never count as backlog.
- * `Degraded`, not `Down`: the sagas' state is durably stored; a warning surface. `Down` is reserved
- * for a failing query. An ABSENT table is `Ok` with its reason: the saga module is opt-in, so
- * absence means it is not installed, unlike `es_outbox`, whose absence is an incomplete install.
+ * - Relay lag: the age of the oldest `pending` row, `clock_timestamp() - min(created_at)`. Nothing
+ *   else says that `storm:saga:relay` stopped, that no worker is scheduled, or that the command bus
+ *   refuses, and a saga whose command sits here does not advance.
  *
- * Reads `workflow_outbox` by name so Telemetry observes Saga's table without a type dependency, the
- * way the event outbox check knows `es_outbox`. Auto-registered via the `storm.health_check` tag.
+ * `published` rows are the command trail the settle pairs against, and never count as backlog.
+ *
+ * Both signals are `Degraded` rather than `Down`: the sagas' state is durably stored, so they raise
+ * a warning. `Down` is kept for a failing query. An absent table is `Ok` with its reason: the saga
+ * module is opt-in, so its absence means it is not installed, where an absent `es_outbox` is an
+ * incomplete install.
+ *
+ * The check reads `workflow_outbox` by name, so Telemetry observes Saga's table without a type
+ * dependency, as the event outbox check reads `es_outbox`. The `storm.health_check` tag registers
+ * it.
  */
 final readonly class SagaOutboxLivenessHealthCheck implements SqlHealthCheck
 {
@@ -65,7 +70,13 @@ final readonly class SagaOutboxLivenessHealthCheck implements SqlHealthCheck
                 return HealthCheckResult::ok('workflow_outbox is absent — the saga module is not installed on this database');
             }
 
-            /** @var array{oldest_pending: int|string|null, failed_count: int|string, oldest_failed: int|string|null}|false $row */
+            /**
+             * @var array{
+             *     oldest_pending: int|string|null,
+             *     failed_count: int|string,
+             *     oldest_failed: int|string|null,
+             * }|false $row
+             */
             $row = $this->connection->fetchAssociative(
                 /* language=PostgreSQL */
                 "SELECT
